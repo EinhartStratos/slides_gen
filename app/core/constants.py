@@ -1,0 +1,28 @@
+from __future__ import annotations
+
+TASK_STATUS_PENDING = "pending"
+TASK_STATUS_RUNNING = "running"
+TASK_STATUS_STOPPING = "stopping"
+TASK_STATUS_STOPPED = "stopped"
+TASK_STATUS_RESUMING = "resuming"
+TASK_STATUS_COMPLETED = "completed"
+TASK_STATUS_FAILED = "failed"
+TASK_STATUS_CANCELLED = "cancelled"
+
+PAGE_STATUS_PENDING = "pending"
+PAGE_STATUS_RUNNING = "running"
+PAGE_STATUS_COMPLETED = "completed"
+PAGE_STATUS_SKIPPED = "skipped"
+PAGE_STATUS_FAILED = "failed"
+
+TEMPLATE_STATUS_IMPORTING = "importing"
+TEMPLATE_STATUS_READY = "ready"
+TEMPLATE_STATUS_FAILED = "failed"
+
+ARTIFACT_TYPE_REQUEST_JSON = "request_json"
+ARTIFACT_TYPE_REQUIREMENT_MD = "requirement_md"
+ARTIFACT_TYPE_SVG_OUTPUT = "svg_output"
+ARTIFACT_TYPE_SVG_FINAL = "svg_final"
+ARTIFACT_TYPE_RESULT_PPTX = "result_pptx"
+ARTIFACT_TYPE_VALIDATION_REPORT = "validation_report"
+ARTIFACT_TYPE_ANALYSIS_JSON = "analysis_json"
