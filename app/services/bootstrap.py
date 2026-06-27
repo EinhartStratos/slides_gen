@@ -3,7 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 from app.core.config import Settings
-from app.infrastructure.llm.openai_like_client import OpenAILikePageAnalysisClient
+from app.infrastructure.llm.openai_like_client import OpenAILikePageGenerationClient
 from app.infrastructure.llm.prompt_builder import PageAnalysisPromptBuilder
 from app.services.builtin_template_service import BuiltinTemplateService
 from app.services.container import ServiceContainer
@@ -57,8 +57,8 @@ def build_services(settings: Settings) -> AppServices:
         default_template_id=settings.default_template_id,
     )
     prompt_builder = PageAnalysisPromptBuilder()
-    analysis_client = OpenAILikePageAnalysisClient(settings=settings, prompt_builder=prompt_builder)
-    slide_generation_service = SlideGenerationService(analysis_client=analysis_client)
+    generation_client = OpenAILikePageGenerationClient(settings=settings, prompt_builder=prompt_builder)
+    slide_generation_service = SlideGenerationService(generation_client=generation_client)
     svg_validation_service = SvgValidationService()
     pptx_export_service = PptxExportService(container.svg_to_pptx)
     orchestration_service = OrchestrationService(

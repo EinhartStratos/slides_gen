@@ -7,14 +7,14 @@ import urllib.error
 import urllib.request
 
 from app.core.config import Settings
-from app.infrastructure.llm.base import BasePageAnalysisClient, PageAnalysisResult
+from app.infrastructure.llm.base import BasePageGenerationClient, PageGenerationResult
 from app.infrastructure.llm.prompt_builder import PageAnalysisPromptBuilder
 
 
 logger = logging.getLogger(__name__)
 
 
-class OpenAILikePageAnalysisClient(BasePageAnalysisClient):
+class OpenAILikePageGenerationClient(BasePageGenerationClient):
     def __init__(self, settings: Settings, prompt_builder: PageAnalysisPromptBuilder) -> None:
         self.settings = settings
         self.prompt_builder = prompt_builder
@@ -23,16 +23,16 @@ class OpenAILikePageAnalysisClient(BasePageAnalysisClient):
     def enabled(self) -> bool:
         return bool(self.settings.llm_base_url and self.settings.llm_model)
 
-    def analyze_page(
+    def generate_page_svg(
         self,
         api_key: str,
         requirement_text: str,
         page_no: int,
         page_name: str,
-        svg_excerpt: str,
-    ) -> PageAnalysisResult:
+        svg_content: str,
+    ) -> PageGenerationResult:
         if not self.enabled or not api_key.strip():
-            return self._fallback(requirement_text, page_no, page_name)
+            return self._fallback(page_no, page_name)
         try:
             payload = {
                 "model": self.settings.llm_model,
@@ -45,11 +45,10 @@ class OpenAILikePageAnalysisClient(BasePageAnalysisClient):
                             requirement_text=requirement_text,
                             page_no=page_no,
                             page_name=page_name,
-                            svg_excerpt=svg_excerpt,
+                            svg_excerpt=svg_content,
                         ),
                     },
                 ],
-                "response_format": {"type": "json_object"},
             }
             request = urllib.request.Request(
                 url=f"{self.settings.llm_base_url}/chat/completions",
@@ -64,17 +63,25 @@ class OpenAILikePageAnalysisClient(BasePageAnalysisClient):
                 raw = response.read().decode("utf-8")
             model_payload = json.loads(raw)
             content = model_payload["choices"][0]["message"]["content"]
-            parsed = self._parse_content(content, page_no, page_name)
-            parsed.raw_response_text = content
-            parsed.decision_source = "llm"
-            return parsed
+            svg_text = self._extract_svg(content)
+            if not svg_text:
+                logger.warning("LLM 返回内容中未找到有效 SVG，回退到原始模板")
+                return self._fallback(page_no, page_name, raw_response=content)
+            return PageGenerationResult(
+                page_no=page_no,
+                page_name=page_name,
+                should_generate=True,
+                skip_reason="",
+                decision_source="llm",
+                generated_svg=svg_text,
+                raw_response_text=content,
+            )
         except Exception as exc:
-            logger.warning("LLM 分页分析失败，回退启发式逻辑: %s", exc)
-            fallback = self._fallback(requirement_text, page_no, page_name)
-            fallback.raw_response_text = str(exc)
-            return fallback
+            logger.warning("LLM 页面生成失败，回退到原始模板: %s", exc)
+            return self._fallback(page_no, page_name, raw_response=str(exc))
 
-    def _parse_content(self, content: str, page_no: int, page_name: str) -> PageAnalysisResult:
+    @staticmethod
+    def _extract_svg(content: str) -> str | None:
         cleaned = content.strip()
         if cleaned.startswith("```"):
             lines = cleaned.splitlines()
@@ -83,52 +90,21 @@ class OpenAILikePageAnalysisClient(BasePageAnalysisClient):
             if lines and lines[-1].startswith("```"):
                 lines = lines[:-1]
             cleaned = "\n".join(lines).strip()
-        payload = json.loads(cleaned)
-        payload.setdefault("page_no", page_no)
-        payload.setdefault("page_name", page_name)
-        payload.setdefault("skip_reason", "")
-        payload.setdefault("page_title", page_name)
-        payload.setdefault("page_summary", "")
-        payload.setdefault("bullet_points", [])
-        payload.setdefault("diagram_kind", None)
-        payload.setdefault("decision_source", "llm")
-        bullet_points = payload.get("bullet_points") or []
-        payload["bullet_points"] = [str(item).strip() for item in bullet_points if str(item).strip()][:5]
-        return PageAnalysisResult.model_validate(payload)
+        match = re.search(r"<svg[\s>].*</svg>", cleaned, re.DOTALL | re.IGNORECASE)
+        if match:
+            return match.group(0).strip()
+        if cleaned.startswith("<svg") or cleaned.startswith("<?xml"):
+            return cleaned
+        return None
 
-    def _fallback(self, requirement_text: str, page_no: int, page_name: str) -> PageAnalysisResult:
-        cleaned = re.sub(r"\s+", " ", requirement_text).strip()
-        if not cleaned:
-            return PageAnalysisResult(
-                page_no=page_no,
-                page_name=page_name,
-                should_generate=False,
-                skip_reason="需求文本为空，无法生成该页内容",
-                page_title=page_name,
-                page_summary="",
-                bullet_points=[],
-                diagram_kind=None,
-                decision_source="heuristic",
-            )
-        sentences = [segment.strip() for segment in re.split(r"[。！？\n]", requirement_text) if segment.strip()]
-        summary = sentences[0] if sentences else cleaned[:120]
-        bullet_points = [segment[:60] for segment in sentences[:3]]
-        lowered = cleaned.lower()
-        diagram_kind = None
-        if any(keyword in lowered for keyword in ["架构", "architecture"]):
-            diagram_kind = "architecture"
-        elif any(keyword in lowered for keyword in ["时序", "sequence"]):
-            diagram_kind = "sequence"
-        elif any(keyword in lowered for keyword in ["流程", "flow"]):
-            diagram_kind = "flowchart"
-        return PageAnalysisResult(
+    @staticmethod
+    def _fallback(page_no: int, page_name: str, raw_response: str | None = None) -> PageGenerationResult:
+        return PageGenerationResult(
             page_no=page_no,
             page_name=page_name,
             should_generate=True,
             skip_reason="",
-            page_title=page_name,
-            page_summary=summary[:140],
-            bullet_points=bullet_points,
-            diagram_kind=diagram_kind,
             decision_source="heuristic",
+            generated_svg=None,
+            raw_response_text=raw_response,
         )

@@ -134,7 +134,7 @@ class OrchestrationService:
                 self.task_service.create_event(task_id, api_key, "page_started", "page_generation", f"开始处理第 {index} 页", page_no=index)
 
                 try:
-                    analysis = self.slide_service.analyse_page(api_key, str(task["requirement_text"]), index, source_svg)
+                    analysis = self.slide_service.generate_page_content(api_key, str(task["requirement_text"]), index, source_svg)
                     analysis_path = self.slide_service.write_analysis(task_workspace, index, analysis)
                     ftp_analysis_path = self.ftp.upload_file(
                         analysis_path,
