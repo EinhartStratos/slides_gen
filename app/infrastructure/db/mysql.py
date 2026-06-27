@@ -49,11 +49,9 @@ class MySQLDatabase:
             return False
 
     def fetch_one(self, sql: str, params: tuple[Any, ...] | None = None) -> dict[str, Any] | None:
-        print(sql)
         with self.connection() as conn:
             with conn.cursor() as cursor:
                 cursor.execute(sql, params or ())
-                print(cursor.fetchone())
                 return cursor.fetchone()
 
     def fetch_all(self, sql: str, params: tuple[Any, ...] | None = None) -> list[dict[str, Any]]:

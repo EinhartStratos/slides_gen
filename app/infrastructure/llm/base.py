@@ -7,6 +7,11 @@ from pydantic import Field
 from app.schemas.common import SchemaModel
 
 
+class TextReplacement(SchemaModel):
+    original_text: str = Field(..., description="模板中的原始文字")
+    new_text: str = Field(..., description="替换后的文字")
+
+
 class PageAnalysisResult(SchemaModel):
     page_no: int = Field(..., description="页码")
     page_name: str = Field(..., description="页面名称")
@@ -18,6 +23,7 @@ class PageAnalysisResult(SchemaModel):
     diagram_kind: str | None = Field(default=None, description="图形类型")
     decision_source: str = Field(default="heuristic", description="判定来源")
     raw_response_text: str | None = Field(default=None, description="模型原始返回文本")
+    text_replacements: list[TextReplacement] = Field(default_factory=list, description="模板文字替换列表")
 
 
 class BasePageAnalysisClient(ABC):

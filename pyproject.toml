@@ -14,7 +14,7 @@ dependencies = [
     "python-dotenv>=1.0,<2",
     "openai>=2.44.0",
     "pytest>=8.0,<9",
-    "httpx2>=2.0,<3",
+    "httpx2>=2.0,<3"
 ]
 
 [tool.uv]
@@ -22,3 +22,5 @@ index-url = "https://mirrors.tencent.com/pypi/simple"
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+asyncio_mode = "auto"
+

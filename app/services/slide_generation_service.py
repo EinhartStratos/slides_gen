@@ -2,7 +2,6 @@ from __future__ import annotations
 
 from pathlib import Path
 import json
-import textwrap
 from xml.etree import ElementTree as ET
 
 from app.infrastructure.llm.base import BasePageAnalysisClient
@@ -47,6 +46,7 @@ class SlideGenerationService:
             "diagram_kind": None,
             "decision_source": "template_reuse_v1",
             "requirement_length": len(requirement_text.strip()),
+            "text_replacements": [],
         }
 
     def write_analysis(self, workspace: TaskWorkspace, page_no: int, analysis: dict) -> Path:
@@ -60,9 +60,8 @@ class SlideGenerationService:
         tree = ET.parse(source_svg_path)
         root = tree.getroot()
         ns = self._svg_namespace(root)
-        width, height = self._canvas_size(root)
         self._apply_generation_metadata(root, ns, analysis)
-        self._append_generated_content(root, ns, width, height, analysis)
+        self._apply_text_replacements(root, ns, analysis)
         tree.write(output_svg_path, encoding="utf-8", xml_declaration=True)
         final_svg_path.write_bytes(output_svg_path.read_bytes())
         return output_svg_path, final_svg_path
@@ -121,89 +120,38 @@ class SlideGenerationService:
             ensure_ascii=False,
         )
 
-    def _append_generated_content(self, root: ET.Element, ns: str, width: float, height: float, analysis: dict) -> None:
-        title = str(analysis.get("page_title") or analysis.get("page_name") or "")
-        summary = str(analysis.get("page_summary") or "")
-        bullet_points = [str(item).strip() for item in analysis.get("bullet_points", []) if str(item).strip()]
-        if not title and not summary and not bullet_points:
+    def _apply_text_replacements(self, root: ET.Element, ns: str, analysis: dict) -> None:
+        replacements = analysis.get("text_replacements") or []
+        if not replacements:
             return
-        margin_x = max(width * 0.05, 32)
-        panel_width = max(width - margin_x * 2, 240)
-        panel_height = min(max(height * 0.24, 120), 220)
-        panel_y = max(height - panel_height - margin_x, margin_x)
-        group = ET.SubElement(
-            root,
-            self._svg_tag(ns, "g"),
-            {
-                "id": "generated-content-group",
-                "data-gen-editable": "true",
-                "data-gen-source": str(analysis.get("decision_source") or "heuristic"),
-            },
-        )
-        ET.SubElement(
-            group,
-            self._svg_tag(ns, "rect"),
-            {
-                "id": "generated-content-panel",
-                "x": self._fmt(margin_x),
-                "y": self._fmt(panel_y),
-                "width": self._fmt(panel_width),
-                "height": self._fmt(panel_height),
-                "rx": "16",
-                "fill": "#FFFFFF",
-                "fill-opacity": "0.94",
-                "stroke": "#D0D7DE",
-                "stroke-width": "1.5",
-            },
-        )
-        cursor_y = panel_y + 30
-        if title:
-            title_el = ET.SubElement(
-                group,
-                self._svg_tag(ns, "text"),
-                {
-                    "id": "generated-title",
-                    "x": self._fmt(margin_x + 18),
-                    "y": self._fmt(cursor_y),
-                    "font-size": "22",
-                    "font-weight": "700",
-                    "fill": "#111827",
-                },
-            )
-            title_el.text = title[:48]
-            cursor_y += 28
-        if summary:
-            summary_lines = textwrap.wrap(summary, width=34)[:2]
-            for idx, line in enumerate(summary_lines, start=1):
-                summary_el = ET.SubElement(
-                    group,
-                    self._svg_tag(ns, "text"),
-                    {
-                        "id": f"generated-summary-{idx}",
-                        "x": self._fmt(margin_x + 18),
-                        "y": self._fmt(cursor_y),
-                        "font-size": "16",
-                        "fill": "#374151",
-                    },
-                )
-                summary_el.text = line
-                cursor_y += 22
-        for idx, bullet in enumerate(bullet_points[:3], start=1):
-            bullet_lines = textwrap.wrap(bullet, width=30)[:2]
-            for sub_idx, line in enumerate(bullet_lines, start=1):
-                bullet_el = ET.SubElement(
-                    group,
-                    self._svg_tag(ns, "text"),
-                    {
-                        "id": f"generated-bullet-{idx}-{sub_idx}",
-                        "x": self._fmt(margin_x + 28),
-                        "y": self._fmt(cursor_y),
-                        "font-size": "15",
-                        "fill": "#1F2937",
-                    },
-                )
-                bullet_el.text = f"• {line}" if sub_idx == 1 else f"  {line}"
-                cursor_y += 20
+        replacement_map: dict[str, str] = {}
+        for item in replacements:
+            if isinstance(item, dict):
+                original = str(item.get("original_text", "")).strip()
+                new_text = str(item.get("new_text", "")).strip()
+                if original and original != new_text:
+                    replacement_map[original] = new_text
+        if not replacement_map:
+            return
+        text_tag = self._svg_tag(ns, "text")
+        tspan_tag = self._svg_tag(ns, "tspan")
+        for text_el in root.iter(text_tag):
+            tspans = list(text_el.iter(tspan_tag))
+            if tspans:
+                full_text = "".join(t.text or "" for t in tspans).strip()
+                if full_text in replacement_map:
+                    tspans[0].text = replacement_map[full_text]
+                    for extra in tspans[1:]:
+                        extra.text = ""
+                    continue
+                for tspan in tspans:
+                    tspan_text = (tspan.text or "").strip()
+                    if tspan_text in replacement_map:
+                        tspan.text = replacement_map[tspan_text]
+            else:
+                direct_text = (text_el.text or "").strip()
+                if direct_text in replacement_map:
+                    text_el.text = replacement_map[direct_text]
 
     @staticmethod
     def _fmt(value: float) -> str:
