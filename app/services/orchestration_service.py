@@ -72,7 +72,27 @@ class OrchestrationService:
 
             existing_pages = {row["page_no"]: row for row in self.task_service.repository.list_pages(task_id)}
             total_pages = len(source_svgs)
-            self.task_service.repository.update_task(task_id, {"total_pages": total_pages, "current_stage": "page_generation", "progress": 5})
+            self.task_service.repository.update_task(task_id, {"total_pages": total_pages, "current_stage": "page_planning", "progress": 5})
+
+            page_plans = self.slide_service.plan_pages(api_key, str(task["requirement_text"]), source_svgs)
+            plan_path = self.slide_service.write_plan(task_workspace, page_plans)
+            ftp_plan_path = self.ftp.upload_file(
+                plan_path,
+                self.ftp.join(str(task["ftp_task_dir"]), "analysis", plan_path.name),
+            )
+            self.task_service.create_artifact(
+                task_id,
+                ARTIFACT_TYPE_ANALYSIS_JSON,
+                ftp_plan_path,
+                plan_path.name,
+                file_size_bytes=plan_path.stat().st_size,
+                content_type="application/json",
+            )
+            self.task_service.create_event(task_id, api_key, "planning_done", "page_planning", f"页面规划完成，共{total_pages}页")
+
+            plan_map = {p["page_no"]: p for p in page_plans}
+
+            self.task_service.repository.update_task(task_id, {"current_stage": "page_generation", "progress": 10})
 
             completed_pages = 0
             skipped_pages = 0
@@ -101,7 +121,7 @@ class OrchestrationService:
                         self.ftp.download_file(str(page_row["ftp_final_svg_path"]), local_final_path)
                     completed_pages += 1
                     processed_pages += 1
-                    progress = 5 + (processed_pages / max(total_pages, 1)) * 75
+                    progress = 10 + (processed_pages / max(total_pages, 1)) * 80
                     self.task_service.repository.update_task(
                         task_id,
                         {
@@ -133,57 +153,57 @@ class OrchestrationService:
                 )
                 self.task_service.create_event(task_id, api_key, "page_started", "page_generation", f"开始处理第 {index} 页", page_no=index)
 
+                page_plan = plan_map.get(index, {})
+                if not page_plan.get("should_generate", True):
+                    skipped_pages += 1
+                    processed_pages += 1
+                    self.task_service.repository.upsert_page(
+                        {
+                            "task_id": task_id,
+                            "page_no": index,
+                            "page_name": page_name,
+                            "template_svg_ftp_path": template_svg_ftp_path,
+                            "status": PAGE_STATUS_SKIPPED,
+                            "should_generate": 0,
+                            "skip_reason": page_plan.get("skip_reason", ""),
+                            "completed_at": datetime.now(),
+                        }
+                    )
+                    self.task_service.create_event(task_id, api_key, "page_skipped", "page_generation", f"第 {index} 页跳过: {page_plan.get('skip_reason', '')}", page_no=index)
+                    progress = 10 + (processed_pages / max(total_pages, 1)) * 80
+                    self.task_service.repository.update_task(
+                        task_id,
+                        {
+                            "processed_pages": processed_pages,
+                            "completed_pages": completed_pages,
+                            "skipped_pages": skipped_pages,
+                            "failed_pages": failed_pages,
+                            "progress": round(progress, 2),
+                            "last_heartbeat_at": datetime.now(),
+                        },
+                    )
+                    continue
+
                 try:
-                    analysis = self.slide_service.generate_page_content(api_key, str(task["requirement_text"]), index, source_svg)
-                    analysis_path = self.slide_service.write_analysis(task_workspace, index, analysis)
+                    page_result = self.slide_service.generate_page_svg(api_key, str(task["requirement_text"]), index, source_svg, page_plan)
+                    result_path = self.slide_service.write_page_result(task_workspace, index, page_result)
                     ftp_analysis_path = self.ftp.upload_file(
-                        analysis_path,
-                        self.ftp.join(str(task["ftp_task_dir"]), "analysis", analysis_path.name),
+                        result_path,
+                        self.ftp.join(str(task["ftp_task_dir"]), "analysis", result_path.name),
                     )
                     self.task_service.create_artifact(
                         task_id,
                         ARTIFACT_TYPE_ANALYSIS_JSON,
                         ftp_analysis_path,
-                        analysis_path.name,
+                        result_path.name,
                         page_no=index,
-                        file_size_bytes=analysis_path.stat().st_size,
+                        file_size_bytes=result_path.stat().st_size,
                         content_type="application/json",
                     )
 
-                    should_generate = bool(analysis.get("should_generate", True))
-                    if not should_generate:
-                        skipped_pages += 1
-                        processed_pages += 1
-                        self.task_service.repository.upsert_page(
-                            {
-                                "task_id": task_id,
-                                "page_no": index,
-                                "page_name": page_name,
-                                "template_svg_ftp_path": template_svg_ftp_path,
-                                "analysis_json_ftp_path": ftp_analysis_path,
-                                "status": PAGE_STATUS_SKIPPED,
-                                "should_generate": 0,
-                                "skip_reason": analysis.get("skip_reason"),
-                                "completed_at": datetime.now(),
-                            }
-                        )
-                        progress = 5 + (processed_pages / max(total_pages, 1)) * 75
-                        self.task_service.repository.update_task(
-                            task_id,
-                            {
-                                "processed_pages": processed_pages,
-                                "completed_pages": completed_pages,
-                                "skipped_pages": skipped_pages,
-                                "failed_pages": failed_pages,
-                                "progress": round(progress, 2),
-                                "last_heartbeat_at": datetime.now(),
-                            },
-                        )
-                        continue
-
                     output_svg_path = task_workspace.svg_output_dir / source_svg.name
                     final_svg_path = task_workspace.svg_final_dir / source_svg.name
-                    generated_svg_path, final_svg_path = self.slide_service.generate_page(source_svg, output_svg_path, final_svg_path, analysis)
+                    generated_svg_path, final_svg_path = self.slide_service.render_page(source_svg, output_svg_path, final_svg_path, page_result)
                     validation_status, validation_message = self.svg_validation_service.validate(final_svg_path)
 
                     ftp_generated_svg_path = self.ftp.upload_file(
@@ -222,7 +242,6 @@ class OrchestrationService:
                             "analysis_json_ftp_path": ftp_analysis_path,
                             "status": PAGE_STATUS_COMPLETED if validation_status == "passed" else PAGE_STATUS_FAILED,
                             "should_generate": 1,
-                            "skip_reason": analysis.get("skip_reason", ""),
                             "ftp_generated_svg_path": ftp_generated_svg_path,
                             "ftp_final_svg_path": ftp_final_svg_path,
                             "validation_status": validation_status,
@@ -254,7 +273,7 @@ class OrchestrationService:
                     )
                     self.task_service.create_event(task_id, api_key, "page_failed", "page_generation", f"第 {index} 页失败: {exc}", page_no=index)
 
-                progress = 5 + (processed_pages / max(total_pages, 1)) * 75
+                progress = 10 + (processed_pages / max(total_pages, 1)) * 80
                 self.task_service.repository.update_task(
                     task_id,
                     {

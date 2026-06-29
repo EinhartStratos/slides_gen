@@ -7,7 +7,7 @@ import urllib.error
 import urllib.request
 
 from app.core.config import Settings
-from app.infrastructure.llm.base import BasePageGenerationClient, PageGenerationResult
+from app.infrastructure.llm.base import BasePageGenerationClient, PagePlanResult, PageGenerationResult
 from app.infrastructure.llm.prompt_builder import PageAnalysisPromptBuilder
 
 
@@ -23,62 +23,149 @@ class OpenAILikePageGenerationClient(BasePageGenerationClient):
     def enabled(self) -> bool:
         return bool(self.settings.llm_base_url and self.settings.llm_model)
 
+    def _call_llm(self, api_key: str, system_prompt: str, user_prompt: str, use_json: bool = False) -> str:
+        payload: dict = {
+            "model": self.settings.llm_model,
+            "temperature": 0.2,
+            "messages": [
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": user_prompt},
+            ],
+        }
+        if use_json:
+            payload["response_format"] = {"type": "json_object"}
+        request = urllib.request.Request(
+            url=f"{self.settings.llm_base_url}/chat/completions",
+            data=json.dumps(payload).encode("utf-8"),
+            headers={
+                "Content-Type": "application/json",
+                "Authorization": f"Bearer {api_key}",
+            },
+            method="POST",
+        )
+        with urllib.request.urlopen(request, timeout=self.settings.llm_timeout_seconds) as response:
+            raw = response.read().decode("utf-8")
+        model_payload = json.loads(raw)
+        return model_payload["choices"][0]["message"]["content"]
+
+    def plan_pages(
+        self,
+        api_key: str,
+        requirement_text: str,
+        page_list: list[dict],
+    ) -> list[PagePlanResult]:
+        if not self.enabled or not api_key.strip():
+            return self._plan_fallback(page_list)
+        try:
+            content = self._call_llm(
+                api_key=api_key,
+                system_prompt=self.prompt_builder.build_plan_system_prompt(),
+                user_prompt=self.prompt_builder.build_plan_user_prompt(requirement_text, page_list),
+                use_json=True,
+            )
+            plans = self._parse_plan_response(content, page_list)
+            for p in plans:
+                p.decision_source = "llm"
+                p.raw_response_text = content
+            return plans
+        except Exception as exc:
+            logger.warning("LLM 页面规划失败，回退启发式逻辑: %s", exc)
+            return self._plan_fallback(page_list)
+
     def generate_page_svg(
         self,
         api_key: str,
         requirement_text: str,
         page_no: int,
         page_name: str,
+        page_type: str,
+        page_title: str,
         svg_content: str,
     ) -> PageGenerationResult:
         if not self.enabled or not api_key.strip():
-            return self._fallback(page_no, page_name)
+            return self._generate_fallback(page_no, page_name)
         try:
-            payload = {
-                "model": self.settings.llm_model,
-                "temperature": 0.2,
-                "messages": [
-                    {"role": "system", "content": self.prompt_builder.build_system_prompt()},
-                    {
-                        "role": "user",
-                        "content": self.prompt_builder.build_user_prompt(
-                            requirement_text=requirement_text,
-                            page_no=page_no,
-                            page_name=page_name,
-                            svg_excerpt=svg_content,
-                        ),
-                    },
-                ],
-            }
-            request = urllib.request.Request(
-                url=f"{self.settings.llm_base_url}/chat/completions",
-                data=json.dumps(payload).encode("utf-8"),
-                headers={
-                    "Content-Type": "application/json",
-                    "Authorization": f"Bearer {api_key}",
-                },
-                method="POST",
+            content = self._call_llm(
+                api_key=api_key,
+                system_prompt=self.prompt_builder.build_generate_system_prompt(page_type),
+                user_prompt=self.prompt_builder.build_generate_user_prompt(
+                    requirement_text=requirement_text,
+                    page_no=page_no,
+                    page_name=page_name,
+                    page_type=page_type,
+                    page_title=page_title,
+                    svg_content=svg_content,
+                ),
             )
-            with urllib.request.urlopen(request, timeout=self.settings.llm_timeout_seconds) as response:
-                raw = response.read().decode("utf-8")
-            model_payload = json.loads(raw)
-            content = model_payload["choices"][0]["message"]["content"]
             svg_text = self._extract_svg(content)
             if not svg_text:
-                logger.warning("LLM 返回内容中未找到有效 SVG，回退到原始模板")
-                return self._fallback(page_no, page_name, raw_response=content)
+                logger.warning("LLM 返回内容中未找到有效 SVG，回退到原始模板 (page=%s)", page_no)
+                return self._generate_fallback(page_no, page_name, raw_response=content)
             return PageGenerationResult(
+                page_no=page_no,
+                page_name=page_name,
+                generated_svg=svg_text,
+                decision_source="llm",
+                raw_response_text=content,
+            )
+        except Exception as exc:
+            logger.warning("LLM 页面生成失败，回退到原始模板 (page=%s): %s", page_no, exc)
+            return self._generate_fallback(page_no, page_name, raw_response=str(exc))
+
+    @staticmethod
+    def _parse_plan_response(content: str, page_list: list[dict]) -> list[PagePlanResult]:
+        cleaned = content.strip()
+        if cleaned.startswith("```"):
+            lines = cleaned.splitlines()
+            if lines and lines[0].startswith("```"):
+                lines = lines[1:]
+            if lines and lines[-1].startswith("```"):
+                lines = lines[:-1]
+            cleaned = "\n".join(lines).strip()
+        data = json.loads(cleaned)
+        if isinstance(data, dict):
+            data = [data]
+        name_map = {p["page_no"]: p["page_name"] for p in page_list}
+        results = []
+        for item in data:
+            page_no = int(item.get("page_no", 0))
+            results.append(PagePlanResult(
+                page_no=page_no,
+                page_name=name_map.get(page_no, f"slide_{page_no:02d}"),
+                should_generate=bool(item.get("should_generate", True)),
+                skip_reason=str(item.get("skip_reason", "")),
+                page_type=str(item.get("page_type", "content")),
+                page_title=str(item.get("page_title", "")),
+                decision_source="llm",
+            ))
+        return results
+
+    @staticmethod
+    def _plan_fallback(page_list: list[dict]) -> list[PagePlanResult]:
+        results = []
+        for i, p in enumerate(page_list):
+            page_no = p["page_no"]
+            page_name = p["page_name"]
+            if i == 0:
+                page_type = "cover"
+            elif i == len(page_list) - 1:
+                page_type = "end"
+            elif "目录" in page_name or "toc" in page_name.lower():
+                page_type = "toc"
+            elif any(kw in page_name for kw in ["架构", "流程", "时序", "图"]):
+                page_type = "diagram"
+            else:
+                page_type = "content"
+            results.append(PagePlanResult(
                 page_no=page_no,
                 page_name=page_name,
                 should_generate=True,
                 skip_reason="",
-                decision_source="llm",
-                generated_svg=svg_text,
-                raw_response_text=content,
-            )
-        except Exception as exc:
-            logger.warning("LLM 页面生成失败，回退到原始模板: %s", exc)
-            return self._fallback(page_no, page_name, raw_response=str(exc))
+                page_type=page_type,
+                page_title=page_name,
+                decision_source="heuristic",
+            ))
+        return results
 
     @staticmethod
     def _extract_svg(content: str) -> str | None:
@@ -98,13 +185,11 @@ class OpenAILikePageGenerationClient(BasePageGenerationClient):
         return None
 
     @staticmethod
-    def _fallback(page_no: int, page_name: str, raw_response: str | None = None) -> PageGenerationResult:
+    def _generate_fallback(page_no: int, page_name: str, raw_response: str | None = None) -> PageGenerationResult:
         return PageGenerationResult(
             page_no=page_no,
             page_name=page_name,
-            should_generate=True,
-            skip_reason="",
-            decision_source="heuristic",
             generated_svg=None,
+            decision_source="heuristic",
             raw_response_text=raw_response,
         )
