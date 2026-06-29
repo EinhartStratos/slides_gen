@@ -23,6 +23,8 @@ async def lifespan(app: FastAPI):
     settings = get_settings()
     setup_logging()
     services = build_services(settings)
+    print(settings.llm_base_url)
+    print(settings.llm_model)
     services.builtin_template_service.repository.db.ping()
     services.container.workspace.ensure_runtime_dirs()
     try:

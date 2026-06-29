@@ -3,8 +3,9 @@ from __future__ import annotations
 import json
 import logging
 import re
-import urllib.error
-import urllib.request
+import traceback
+
+import httpx2
 
 from app.core.config import Settings
 from app.infrastructure.llm.base import BasePageGenerationClient, PagePlanResult, PageGenerationResult
@@ -23,10 +24,25 @@ class OpenAILikePageGenerationClient(BasePageGenerationClient):
     def enabled(self) -> bool:
         return bool(self.settings.llm_base_url and self.settings.llm_model)
 
-    def _call_llm(self, api_key: str, system_prompt: str, user_prompt: str, use_json: bool = False) -> str:
+    @property
+    def _api_url(self) -> str:
+        base = self.settings.llm_base_url.rstrip("/")
+        if not base.endswith("/v1"):
+            base = f"{base}/v1"
+        return f"{base}/chat/completions"
+
+    def _call_llm(
+        self,
+        api_key: str,
+        system_prompt: str,
+        user_prompt: str,
+        use_json: bool = False,
+        stream: bool = True,
+    ) -> str:
         payload: dict = {
             "model": self.settings.llm_model,
             "temperature": 0.2,
+            "stream": stream,
             "messages": [
                 {"role": "system", "content": system_prompt},
                 {"role": "user", "content": user_prompt},
@@ -34,19 +50,51 @@ class OpenAILikePageGenerationClient(BasePageGenerationClient):
         }
         if use_json:
             payload["response_format"] = {"type": "json_object"}
-        request = urllib.request.Request(
-            url=f"{self.settings.llm_base_url}/chat/completions",
-            data=json.dumps(payload).encode("utf-8"),
-            headers={
-                "Content-Type": "application/json",
-                "Authorization": f"Bearer {api_key}",
-            },
-            method="POST",
-        )
-        with urllib.request.urlopen(request, timeout=self.settings.llm_timeout_seconds) as response:
-            raw = response.read().decode("utf-8")
-        model_payload = json.loads(raw)
-        return model_payload["choices"][0]["message"]["content"]
+
+        headers = {
+            "Content-Type": "application/json",
+            "Authorization": f"Bearer {api_key}",
+        }
+        timeout = httpx2.Timeout(self.settings.llm_timeout_seconds, connect=30.0)
+
+        if stream:
+            return self._call_stream(payload, headers, timeout)
+        return self._call_non_stream(payload, headers, timeout)
+
+    def _call_stream(self, payload: dict, headers: dict, timeout: httpx2.Timeout) -> str:
+        content_parts: list[str] = []
+        with httpx2.Client(timeout=timeout) as client:
+            with client.stream(
+                "POST",
+                self._api_url,
+                json=payload,
+                headers=headers,
+            ) as response:
+                response.raise_for_status()
+                for line in response.iter_lines():
+                    if not line:
+                        continue
+                    if line.startswith("data: "):
+                        data_str = line[6:]
+                        if data_str.strip() == "[DONE]":
+                            break
+                        try:
+                            chunk = json.loads(data_str)
+                            delta = chunk.get("choices", [{}])[0].get("delta", {})
+                            text = delta.get("content")
+                            if text:
+                                content_parts.append(text)
+                        except json.JSONDecodeError:
+                            logger.debug("跳过无法解析的 SSE 行: %s", data_str[:80])
+        return "".join(content_parts)
+
+    def _call_non_stream(self, payload: dict, headers: dict, timeout: httpx2.Timeout) -> str:
+        payload["stream"] = False
+        with httpx2.Client(timeout=timeout) as client:
+            response = client.post(self._api_url, json=payload, headers=headers)
+            response.raise_for_status()
+            model_payload = response.json()
+            return model_payload["choices"][0]["message"]["content"]
 
     def plan_pages(
         self,
@@ -62,14 +110,16 @@ class OpenAILikePageGenerationClient(BasePageGenerationClient):
                 system_prompt=self.prompt_builder.build_plan_system_prompt(),
                 user_prompt=self.prompt_builder.build_plan_user_prompt(requirement_text, page_list),
                 use_json=True,
+                stream=False,
             )
+            logger.info("LLM 页面规划返回: %s", content[:200])
             plans = self._parse_plan_response(content, page_list)
             for p in plans:
                 p.decision_source = "llm"
                 p.raw_response_text = content
             return plans
         except Exception as exc:
-            logger.warning("LLM 页面规划失败，回退启发式逻辑: %s", exc)
+            logger.warning("LLM 页面规划失败，回退启发式逻辑: %s", traceback.format_exc())
             return self._plan_fallback(page_list)
 
     def generate_page_svg(
