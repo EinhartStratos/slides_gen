@@ -157,12 +157,27 @@ class OrchestrationService:
                 if not page_plan.get("should_generate", True):
                     skipped_pages += 1
                     processed_pages += 1
+                    plan_result_path = self.slide_service.write_page_result(task_workspace, index, page_plan)
+                    ftp_plan_result_path = self.ftp.upload_file(
+                        plan_result_path,
+                        self.ftp.join(str(task["ftp_task_dir"]), "analysis", plan_result_path.name),
+                    )
+                    self.task_service.create_artifact(
+                        task_id,
+                        ARTIFACT_TYPE_ANALYSIS_JSON,
+                        ftp_plan_result_path,
+                        plan_result_path.name,
+                        page_no=index,
+                        file_size_bytes=plan_result_path.stat().st_size,
+                        content_type="application/json",
+                    )
                     self.task_service.repository.upsert_page(
                         {
                             "task_id": task_id,
                             "page_no": index,
                             "page_name": page_name,
                             "template_svg_ftp_path": template_svg_ftp_path,
+                            "analysis_json_ftp_path": ftp_plan_result_path,
                             "status": PAGE_STATUS_SKIPPED,
                             "should_generate": 0,
                             "skip_reason": page_plan.get("skip_reason", ""),

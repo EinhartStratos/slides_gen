@@ -63,6 +63,7 @@ class OpenAILikePageGenerationClient(BasePageGenerationClient):
 
     def _call_stream(self, payload: dict, headers: dict, timeout: httpx2.Timeout) -> str:
         content_parts: list[str] = []
+        print(self._api_url)
         with httpx2.Client(timeout=timeout) as client:
             with client.stream(
                 "POST",
@@ -90,6 +91,7 @@ class OpenAILikePageGenerationClient(BasePageGenerationClient):
 
     def _call_non_stream(self, payload: dict, headers: dict, timeout: httpx2.Timeout) -> str:
         payload["stream"] = False
+        print(self._api_url)
         with httpx2.Client(timeout=timeout) as client:
             response = client.post(self._api_url, json=payload, headers=headers)
             response.raise_for_status()
