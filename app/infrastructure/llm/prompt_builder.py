@@ -4,12 +4,11 @@ from __future__ import annotations
 class PageAnalysisPromptBuilder:
     def build_plan_system_prompt(self) -> str:
         return (
-            "你是 PPT 页面规划助手。你的任务是根据需求文本和模板页列表，"
-            "判断每一页是否需要生成内容，并给出页面类型和标题。\n\n"
+            "你是 PPT 页面规划助手。你的任务是根据需求文本和单页模板 SVG 内容，"
+            "判断该页是否需要生成内容，并给出页面类型和标题。\n\n"
             "输出要求：\n"
-            "1. 只输出 JSON 数组，不要 markdown，不要代码块。\n"
-            "2. 数组中每个元素对应一页，包含以下字段：\n"
-            "   - page_no: 页码（整数）\n"
+            "1. 只输出一个 JSON 对象，不要 markdown，不要代码块。\n"
+            "2. JSON 对象包含以下字段：\n"
             "   - should_generate: 该页是否需要生成内容（布尔值）\n"
             "   - skip_reason: 跳过原因（如不跳过则为空字符串）\n"
             "   - page_type: 页面类型，取值为 cover/toc/content/diagram/end 之一\n"
@@ -18,31 +17,32 @@ class PageAnalysisPromptBuilder:
             "     * content: 普通内容页（文字为主）\n"
             "     * diagram: 图形页（架构图、流程图、时序图等需要画图的页面）\n"
             "     * end: 结尾页（感谢页等）\n"
-            "   - page_title: 该页标题（根据需求提炼）\n"
+            "   - page_title: 该页标题（根据需求和模板内容提炼）\n"
             "3. 判断 should_generate 的规则：\n"
-            "   - 如果该页的模板内容与需求文本完全无关（如纯装饰页、空白页），设为 false\n"
-            "   - 如果该页有对应的需求内容可填，设为 true\n"
+            "   - 仔细阅读模板 SVG 中的文字内容，如果该页有占位文字、填写说明、示例内容，"
+            "且需求文本中有对应内容可填，设为 true\n"
+            "   - 如果该页模板内容与需求文本完全无关（如纯装饰页、空白页、无对应内容），设为 false，"
+            "并在 skip_reason 中说明原因\n"
             "4. 判断 page_type 的规则：\n"
-            "   - 根据模板页名称和 SVG 结构判断页面类型\n"
+            "   - 根据模板页 SVG 中的文字和结构判断页面类型\n"
             "   - 模板中包含 \"架构图\"、\"流程图\"、\"时序图\" 等关键词的页面应为 diagram\n"
             "   - 第一页通常为 cover，最后一页通常为 end\n"
             "   - 包含目录结构的页面为 toc\n"
-            "5. 只返回 JSON 数组，不要任何其他文字。"
+            "5. 只返回 JSON 对象，不要任何其他文字。"
         )
 
     def build_plan_user_prompt(
         self,
         requirement_text: str,
-        page_list: list[dict],
+        page_no: int,
+        page_name: str,
+        svg_content: str,
     ) -> str:
-        pages_desc = "\n".join(
-            f"  第{p['page_no']}页: {p['page_name']}"
-            for p in page_list
-        )
         return (
             f"需求文本：\n{requirement_text.strip()}\n\n"
-            f"模板页列表（共{len(page_list)}页）：\n{pages_desc}\n\n"
-            "请为每一页判断是否需要生成内容，并给出页面类型和标题。只返回 JSON 数组。"
+            f"当前是第 {page_no} 页，页面名称：{page_name}\n\n"
+            f"该页模板 SVG 内容：\n{svg_content.strip()}\n\n"
+            "请根据需求文本和该页模板内容，判断这一页是否需要生成内容，并给出页面类型和标题。只返回 JSON 对象。"
         )
 
     def build_generate_system_prompt(self, page_type: str) -> str:

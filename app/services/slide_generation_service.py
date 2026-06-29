@@ -34,30 +34,43 @@ class SlideGenerationService:
         requirement_text: str,
         source_svgs: list[Path],
     ) -> list[dict]:
-        page_list = [
-            {"page_no": i, "page_name": svg.stem}
-            for i, svg in enumerate(source_svgs, start=1)
-        ]
-        if self.generation_client is not None:
-            results = self.generation_client.plan_pages(
-                api_key=api_key,
-                requirement_text=requirement_text,
-                page_list=page_list,
-            )
-            return [r.model_dump(mode="json") for r in results]
-        return [
-            {
-                "page_no": p["page_no"],
-                "page_name": p["page_name"],
-                "should_generate": True,
-                "skip_reason": "",
-                "page_type": "cover" if i == 0 else ("end" if i == len(page_list) - 1 else "content"),
-                "page_title": p["page_name"],
-                "decision_source": "heuristic",
-                "raw_response_text": None,
-            }
-            for i, p in enumerate(page_list)
-        ]
+        total_pages = len(source_svgs)
+        results: list[dict] = []
+        for i, svg_path in enumerate(source_svgs, start=1):
+            page_name = svg_path.stem
+            svg_content = svg_path.read_text(encoding="utf-8", errors="ignore")
+            if self.generation_client is not None:
+                plan = self.generation_client.plan_single_page(
+                    api_key=api_key,
+                    requirement_text=requirement_text,
+                    page_no=i,
+                    page_name=page_name,
+                    svg_content=svg_content,
+                    total_pages=total_pages,
+                )
+                results.append(plan.model_dump(mode="json"))
+            else:
+                if i == 1:
+                    page_type = "cover"
+                elif i == total_pages:
+                    page_type = "end"
+                elif "目录" in page_name or "toc" in page_name.lower():
+                    page_type = "toc"
+                elif any(kw in page_name for kw in ["架构", "流程", "时序", "图"]):
+                    page_type = "diagram"
+                else:
+                    page_type = "content"
+                results.append({
+                    "page_no": i,
+                    "page_name": page_name,
+                    "should_generate": True,
+                    "skip_reason": "",
+                    "page_type": page_type,
+                    "page_title": page_name,
+                    "decision_source": "heuristic",
+                    "raw_response_text": None,
+                })
+        return results
 
     def generate_page_svg(
         self,

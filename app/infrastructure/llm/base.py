@@ -28,12 +28,14 @@ class PageGenerationResult(SchemaModel):
 
 class BasePageGenerationClient(ABC):
     @abstractmethod
-    def plan_pages(
+    def plan_single_page(
         self,
         api_key: str,
         requirement_text: str,
-        page_list: list[dict],
-    ) -> list[PagePlanResult]:
+        page_no: int,
+        page_name: str,
+        svg_content: str,
+    ) -> PagePlanResult:
         raise NotImplementedError
 
     @abstractmethod

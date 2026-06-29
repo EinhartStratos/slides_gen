@@ -96,31 +96,38 @@ class OpenAILikePageGenerationClient(BasePageGenerationClient):
             model_payload = response.json()
             return model_payload["choices"][0]["message"]["content"]
 
-    def plan_pages(
+    def plan_single_page(
         self,
         api_key: str,
         requirement_text: str,
-        page_list: list[dict],
-    ) -> list[PagePlanResult]:
+        page_no: int,
+        page_name: str,
+        svg_content: str,
+        total_pages: int = 0,
+    ) -> PagePlanResult:
         if not self.enabled or not api_key.strip():
-            return self._plan_fallback(page_list)
+            return self._plan_fallback_single(page_no, page_name, total_pages)
         try:
             content = self._call_llm(
                 api_key=api_key,
                 system_prompt=self.prompt_builder.build_plan_system_prompt(),
-                user_prompt=self.prompt_builder.build_plan_user_prompt(requirement_text, page_list),
+                user_prompt=self.prompt_builder.build_plan_user_prompt(
+                    requirement_text=requirement_text,
+                    page_no=page_no,
+                    page_name=page_name,
+                    svg_content=svg_content,
+                ),
                 use_json=True,
                 stream=False,
             )
-            logger.info("LLM 页面规划返回: %s", content[:200])
-            plans = self._parse_plan_response(content, page_list)
-            for p in plans:
-                p.decision_source = "llm"
-                p.raw_response_text = content
-            return plans
+            logger.info("LLM 页面规划返回 (page=%s): %s", page_no, content[:200])
+            plan = self._parse_single_plan_response(content, page_no, page_name)
+            if not plan.should_generate:
+                logger.info("第 %s 页跳过，原因: %s", page_no, plan.skip_reason)
+            return plan
         except Exception as exc:
-            logger.warning("LLM 页面规划失败，回退启发式逻辑: %s", traceback.format_exc())
-            return self._plan_fallback(page_list)
+            logger.warning("LLM 页面规划失败 (page=%s)，回退启发式逻辑: %s", page_no, traceback.format_exc())
+            return self._plan_fallback_single(page_no, page_name, total_pages)
 
     def generate_page_svg(
         self,
@@ -163,7 +170,7 @@ class OpenAILikePageGenerationClient(BasePageGenerationClient):
             return self._generate_fallback(page_no, page_name, raw_response=str(exc))
 
     @staticmethod
-    def _parse_plan_response(content: str, page_list: list[dict]) -> list[PagePlanResult]:
+    def _parse_single_plan_response(content: str, page_no: int, page_name: str) -> PagePlanResult:
         cleaned = content.strip()
         if cleaned.startswith("```"):
             lines = cleaned.splitlines()
@@ -173,49 +180,40 @@ class OpenAILikePageGenerationClient(BasePageGenerationClient):
                 lines = lines[:-1]
             cleaned = "\n".join(lines).strip()
         data = json.loads(cleaned)
-        if isinstance(data, dict):
-            data = [data]
-        name_map = {p["page_no"]: p["page_name"] for p in page_list}
-        results = []
-        for item in data:
-            page_no = int(item.get("page_no", 0))
-            results.append(PagePlanResult(
-                page_no=page_no,
-                page_name=name_map.get(page_no, f"slide_{page_no:02d}"),
-                should_generate=bool(item.get("should_generate", True)),
-                skip_reason=str(item.get("skip_reason", "")),
-                page_type=str(item.get("page_type", "content")),
-                page_title=str(item.get("page_title", "")),
-                decision_source="llm",
-            ))
-        return results
+        if isinstance(data, list):
+            data = data[0] if data else {}
+        return PagePlanResult(
+            page_no=page_no,
+            page_name=page_name,
+            should_generate=bool(data.get("should_generate", True)),
+            skip_reason=str(data.get("skip_reason", "")),
+            page_type=str(data.get("page_type", "content")),
+            page_title=str(data.get("page_title", "")),
+            decision_source="llm",
+            raw_response_text=content,
+        )
 
     @staticmethod
-    def _plan_fallback(page_list: list[dict]) -> list[PagePlanResult]:
-        results = []
-        for i, p in enumerate(page_list):
-            page_no = p["page_no"]
-            page_name = p["page_name"]
-            if i == 0:
-                page_type = "cover"
-            elif i == len(page_list) - 1:
-                page_type = "end"
-            elif "目录" in page_name or "toc" in page_name.lower():
-                page_type = "toc"
-            elif any(kw in page_name for kw in ["架构", "流程", "时序", "图"]):
-                page_type = "diagram"
-            else:
-                page_type = "content"
-            results.append(PagePlanResult(
-                page_no=page_no,
-                page_name=page_name,
-                should_generate=True,
-                skip_reason="",
-                page_type=page_type,
-                page_title=page_name,
-                decision_source="heuristic",
-            ))
-        return results
+    def _plan_fallback_single(page_no: int, page_name: str, total_pages: int = 0) -> PagePlanResult:
+        if page_no == 1:
+            page_type = "cover"
+        elif total_pages > 0 and page_no == total_pages:
+            page_type = "end"
+        elif "目录" in page_name or "toc" in page_name.lower():
+            page_type = "toc"
+        elif any(kw in page_name for kw in ["架构", "流程", "时序", "图"]):
+            page_type = "diagram"
+        else:
+            page_type = "content"
+        return PagePlanResult(
+            page_no=page_no,
+            page_name=page_name,
+            should_generate=True,
+            skip_reason="",
+            page_type=page_type,
+            page_title=page_name,
+            decision_source="heuristic",
+        )
 
     @staticmethod
     def _extract_svg(content: str) -> str | None:
