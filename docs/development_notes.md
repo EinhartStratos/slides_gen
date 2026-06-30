@@ -1,101 +1,140 @@
 # slides_gen_server 开发说明
 
-## 1. 当前实现结构
-
-项目当前采用标准 FastAPI 分层结构，核心目录如下：
+## 1. 项目结构
 
 ```text
 app/
-├─ api/                    接口层
-├─ core/                   配置、常量、异常
-├─ schemas/                Pydantic 数据模型
-├─ services/               业务编排与应用服务
-├─ infrastructure/         数据库、存储、LLM、PPT 适配器
-│  ├─ db/
-│  ├─ storage/
-│  ├─ llm/
-│  └─ ppt_master/
-├─ vendor/                 项目内置的第三方运行时代码
-│  └─ ppt_master/
+├─ api/v1/endpoints/        接口层（health, tasks, templates）
+├─ core/                    配置(config.py)、常量(constants.py)、异常(exceptions.py)
+├─ schemas/                 Pydantic 数据模型（task.py, template.py, common.py）
+├─ services/                业务编排层
+│  ├─ orchestration_service.py    任务全生命周期编排
+│  ├─ slide_generation_service.py  逐页规划与生成
+│  ├─ task_service.py             任务 CRUD 和状态管理
+│  ├─ template_service.py         模板查询与复制
+│  ├─ template_import_service.py  模板导入（PPTX→SVG）
+│  ├─ svg_validation_service.py   SVG 校验
+│  ├─ pptx_export_service.py      SVG→PPTX 导出
+│  └─ bootstrap.py                服务依赖组装
+├─ infrastructure/
+│  ├─ db/                   MySQL 数据库适配
+│  ├─ storage/ftp.py        FTP/mock_ftp 存储适配
+│  ├─ llm/                  LLM 客户端
+│  │  ├─ base.py            抽象接口 + Pydantic 模型
+│  │  ├─ openai_like_client.py  OpenAI 风格 API 客户端（httpx2）
+│  │  └─ prompt_builder.py  规划和生成 prompt 构建器
+│  └─ ppt_master/           PPTX↔SVG 转换引擎
+│     ├─ project_workspace.py
+│     ├─ pptx_to_svg_adapter.py
+│     └─ svg_to_pptx_adapter.py
+├─ vendor/ppt_master/       内置运行时脚本和模板资源
+│  ├─ scripts/pptx_to_svg/
+│  ├─ scripts/svg_to_pptx/
+│  ├─ scripts/svg_finalize/
+│  └─ templates/icons/      SVG 图标资源（embed_icons.py 引用）
 └─ main.py
 ```
 
-## 2. 运行时依赖调整
+## 2. 核心生成链路
 
-为避免后续删除参考目录后影响运行，PPT 转换相关运行时代码已迁入：
+### 2.1 两阶段逐页生成
 
-- `app/vendor/ppt_master/scripts/pptx_to_svg`
-- `app/vendor/ppt_master/scripts/svg_to_pptx`
-- `app/vendor/ppt_master/scripts/svg_finalize`
-- `app/vendor/ppt_master/templates/icons`
+每个页面独立走两个阶段：
 
-当前服务运行时不再依赖项目外部参考目录。
+**阶段一：规划（plan_single_page）**
+- 输入：完整需求文本 + 当前页模板 SVG
+- LLM 返回 JSON：`should_generate`、`skip_reason`、`page_type`、`page_title`
+- 规则：封面/尾页/目录页始终 `should_generate=true`
+- 失败处理：重试 3 次，仍失败则回退启发式逻辑
 
-## 3. 存储策略
+**阶段二：生成（generate_page_svg）**
+- 输入：完整需求文本 + 当前页模板 SVG + 规划结果
+- LLM 直接输出完整 SVG 代码（非 JSON）
+- 失败处理：重试 3 次，仍失败则标记 `decision_source=failed`，该页不输出到最终 PPTX
 
-当前存储层采用“本地 mock FTP + 可选远程 FTP”的方式：
+### 2.2 任务编排流程
 
-- 未配置 `FTP_HOST` 时：只使用本地 `mock_ftp/`
-- 配置了远程 FTP 时：远程 FTP 与本地 `mock_ftp/` 同步保留
+```
+run_task()
+├─ 加载模板，复制 SVG 到任务工作区
+├─ 解析 request_payload_json 获取 options.model / options.enable_thinking
+├─ 逐页规划 → plan_pages()
+├─ 逐页生成 → generate_page_svg()
+│  ├─ should_generate=false → 跳过，记录 skip_reason
+│  ├─ decision_source=failed → 跳过，记录错误
+│  └─ 正常生成 → 写入 svg_output / svg_final
+├─ SVG 校验
+├─ 导出 PPTX
+├─ 上传产物到 FTP
+└─ finally: 清理 runtime 任务目录
+```
 
-这样做的目的：
+## 3. LLM 客户端
 
-- 本地调试时不用依赖真实 FTP
-- 所有上传产物都能直接在仓库根目录查看
-- 即使远程 FTP 临时异常，也更容易回退排查
+### 3.1 动态模型和思考模式
 
-## 4. 模板策略
+- 接口 `options.model` 和 `options.enable_thinking` 可动态指定
+- 不传时使用 env 默认值（`LLM_MODEL` / `enable_thinking=false`）
+- 参数从 `request_payload_json` 中解析，经 `orchestration_service` → `slide_generation_service` → `openai_like_client` 透传
 
-当前模板分为两类：
+### 3.2 重试机制
 
-- 公共基础模板：`is_builtin=1`，所有调用方都可使用
-- 私有模板：带 `api_key` 归属，只允许所属调用方使用
+- `plan_single_page` 和 `generate_page_svg` 均有 3 次重试
+- 重试间隔递增（2s、4s）
+- 规划失败回退启发式；生成失败标记为 `failed` 不输出
 
-当前约定：
+### 3.3 流式支持
 
-- `POST /api/v1/templates/import` 导入私有模板，需要 `X-LLM-API-Key`
-- `POST /api/v1/templates/import-builtin` 导入公共基础模板，不需要 `X-LLM-API-Key`
-- 当创建任务不传 `template_id` 时，会优先使用默认基础模板
-- 默认基础模板来源为项目根目录的 `templete.pptx`
+- 使用 `httpx2` 库
+- 规划和生成均支持流式返回（`stream=True`）
+- SSE 格式解析 `data: {...}` 行
 
-## 5. 当前生成链路
+## 4. 存储策略
 
-当前任务主链路如下：
+### 4.1 FTP 存储
 
-1. 创建任务并持久化到 MySQL
-2. 将请求和需求文件写入任务工作区
-3. 从模板工作区复制模板平铺 SVG 与资源
-4. 对每页进行分析
-5. 基于分析结果在模板 SVG 上追加受控文本内容
-6. 校验最终 SVG
-7. 导出最终 PPTX
-8. 将产物写入 `mock_ftp/` 与可选远程 FTP
+- `FTP_HOST` 留空时：仅使用本地 `mock_ftp/`
+- `FTP_HOST` 配置时：远程 FTP + 本地 mock_ftp 双写
+- `MOCK_FTP_ENABLED=false`：关闭 mock_ftp 写入，仅用远程 FTP
 
-## 6. 已补齐的缺失模块
+### 4.2 Runtime 清理
 
-本轮已补充：
+- `runtime/tasks/{task_id}/` 在任务完成或失败后自动清理（`shutil.rmtree`）
+- 所有产物已上传 FTP，runtime 仅作为运行时工作区
 
-- LLM 分页分析基础模块
-- Prompt 构建器
-- OpenAI 风格接口适配器
-- 无模型配置时的本地启发式回退逻辑
-- 基于分析结果的受控 SVG 内容叠加
-- 任务事件查询接口
+## 5. 模板策略
 
-## 7. 当前仍待继续完善的点
+- 公共模板：`is_builtin=1`，所有调用方可使用
+- 私有模板：带 `api_key` 归属，仅限所属调用方
+- 默认模板：项目根目录 `templete.pptx`，启动时自动导入
+- 模板主表示为 SVG 工作区（`svg/` + `svg-flat/`）
 
-当前仍建议继续完善以下内容：
+## 6. Prompt 设计要点
 
-- 更精细的模板页结构识别，而不只是基于整页 SVG 片段做分析
-- 更稳定的可编辑 SVG 布局生成器
-- 图形页的结构化中间结果渲染器
-- 更严格的 SVG 白名单校验
-- 自动化测试
+### 6.1 规划 Prompt
 
-## 8. 相关设计文档
+- 明确要求封面/尾页/目录页 `should_generate=true`
+- 要求输出纯 JSON（无 markdown 代码块）
+- 判断依据：模板 SVG 文字内容 + 需求文本匹配度
 
-可继续参考以下文档：
+### 6.2 生成 Prompt
 
-- `docs/fastapi_service_architecture.md`
-- `docs/mysql_ftp_persistence_design_v2.md`
-- `sql/mysql_init_v2.sql`
+- 直接输出完整 SVG，不输出 JSON 或解释
+- 排版规则：参考模板 y 坐标、行间距 24-28px、内容不超 viewBox
+- **文本框规则**：同一内容区域的多行文字用一个 `<text>` + 多个 `<tspan>` 实现，不要每行单独创建小文本框
+- 只有需要区分标题和正文时才使用不同 `<g>` 组
+
+## 7. 图标资源
+
+`app/vendor/ppt_master/templates/icons/` 下的 SVG 图标被以下脚本使用：
+
+- `scripts/svg_finalize/embed_icons.py`：将 `<use data-icon="...">` 替换为实际 SVG
+- `scripts/svg_to_pptx/use_expander.py`：转 PPTX 时内存中展开图标引用
+
+**不能移除该目录。**
+
+## 8. 相关文档
+
+- `docs/fastapi_service_architecture.md`：架构设计
+- `docs/mysql_ftp_persistence_design_v2.md`：持久化设计
+- `sql/mysql_init_v2.sql`：建表脚本

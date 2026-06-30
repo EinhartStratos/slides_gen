@@ -2,264 +2,147 @@
 
 ## 简介
 
-这是一个用于生成 PPT 的 FastAPI 服务。
+基于 FastAPI 的 PPT 自动生成服务。核心流程：将 PPTX 模板转为逐页 SVG → LLM 逐页规划与生成新 SVG → 校验后转回可编辑 PPTX。
 
 你可以：
 
-- 导入公共基础模板
-- 导入你自己的私有模板
-- 提交生成任务
-- 查询任务进度
+- 导入公共基础模板或私有模板
+- 提交生成任务（支持自定义 LLM 模型和思考模式开关）
+- 查询任务进度和分页状态
 - 下载最终 PPTX
 
 ## 目录说明
 
 - `templete.pptx`：默认基础模板文件
-- `mock_ftp/`：本地模拟 FTP 目录，所有上传产物都可以在这里查看
-- `runtime/`：服务运行时工作区
-- `docs/`：设计文档和开发说明
-
-如果你想看开发实现细节，请查看：
-
-- `docs/development_notes.md`
-- `docs/fastapi_service_architecture.md`
-- `docs/mysql_ftp_persistence_design_v2.md`
+- `mock_ftp/`：本地模拟 FTP 目录（可通过 `MOCK_FTP_ENABLED` 关闭）
+- `runtime/`：服务运行时工作区（任务完成后自动清理）
+- `app/vendor/ppt_master/`：内置的 PPTX↔SVG 转换引擎及图标资源
+- `docs/`：开发文档
 
 ## 环境要求
 
-- Python 3.10 及以上
+- Python 3.10+
 - MySQL
+- uv（包管理）
 
-远程 FTP 是可选的：
+## 环境变量配置
 
-- 本地调试时，不配置 `FTP_HOST` 也可以运行
-- 服务会自动使用 `mock_ftp/` 作为本地模拟 FTP
+项目根目录 `.env` 文件，关键配置项：
 
-## 基本配置
+| 变量 | 说明 | 默认值 |
+|------|------|--------|
+| `API_KEY` | LLM API Key | — |
+| `BASIC_MODEL` | 默认 LLM 模型名称 | — |
+| `HOST` | LLM API 地址 | — |
+| `DB_HOST` / `DB_PORT` / `DB_USER` / `DB_PASSWORD` / `DB_SCHEMA` | MySQL 连接信息 | localhost:3306 |
+| `FTP_HOST` | 远程 FTP 地址（留空则只用 mock_ftp） | — |
+| `FTP_PORT` / `FTP_USER` / `FTP_PASSWORD` | FTP 认证 | — |
+| `FTP_ROOT_DIR` | FTP 根目录 | /slides_gen_server |
+| `MOCK_FTP_ENABLED` | 是否启用本地 mock_ftp 存储 | true |
+| `MOCK_FTP_DIR` | mock_ftp 本地路径 | ./mock_ftp |
+| `DEFAULT_TEMPLATE_FILE` | 默认模板 PPTX 文件路径 | ./templete.pptx |
+| `DEFAULT_TEMPLATE_ID` | 默认模板 ID（留空自动生成） | — |
+| `LLM_BASE_URL` | LLM API 基础 URL（同 HOST） | — |
+| `LLM_MODEL` | LLM 模型名称（同 BASIC_MODEL） | — |
+| `LLM_TIMEOUT_SECONDS` | LLM 请求超时秒数 | 120 |
 
-项目会优先读取根目录的 `.env`。
-
-常用配置项：
-
-- `APP_NAME`
-- `API_PREFIX`
-- `MYSQL_HOST`
-- `MYSQL_PORT`
-- `MYSQL_USER`
-- `MYSQL_PASSWORD`
-- `MYSQL_DATABASE`
-- `FTP_HOST`
-- `FTP_PORT`
-- `FTP_USER`
-- `FTP_PASSWORD`
-- `FTP_ROOT_DIR`
-- `MOCK_FTP_DIR`
-- `DEFAULT_TEMPLATE_FILE`
-- `DEFAULT_TEMPLATE_ID`
-- `LLM_BASE_URL`
-- `LLM_MODEL`
-- `LLM_TIMEOUT_SECONDS`
-
-建议：
-
-- 本地调试时保留 `DEFAULT_TEMPLATE_FILE=templete.pptx`
-- 如果暂时不想接真实 FTP，就不要配置 `FTP_HOST`
-
-## 安装依赖
-
-如果你使用虚拟环境：
+## 安装与启动
 
 ```bash
-python -m venv .venv
+# 安装依赖
+uv sync
+
+# 启动服务
+uv run python -m uvicorn app.main:app --reload
 ```
 
-Windows 激活虚拟环境：
+默认访问：`http://127.0.0.1:8000`
 
-```bash
-.venv\Scripts\activate
+## 核心生成流程
+
+```
+1. 创建任务 → 持久化到 MySQL
+2. 加载模板 → 复制模板 SVG 到任务工作区
+3. 逐页规划（LLM）→ 判断 should_generate / page_type / page_title
+   - 封面、尾页、目录页始终生成
+   - 无关页面跳过并记录 skip_reason
+   - LLM 失败自动重试 3 次
+4. 逐页生成（LLM）→ 输出全新 SVG
+   - LLM 失败重试 3 次，仍失败则跳过该页不输出
+5. SVG 校验 → 导出 PPTX
+6. 上传产物到 FTP → 清理 runtime 任务目录
 ```
 
-安装依赖：
+## API 接口
 
-```bash
-pip install -e .
+### 健康检查
+
 ```
-
-## 启动服务
-
-在项目根目录执行：
-
-```bash
-python -m uvicorn app.main:app --reload
-```
-
-或者：
-
-```bash
-python -m uvicorn main:app --reload
-```
-
-启动后默认访问：
-
-```text
-http://127.0.0.1:8000
-```
-
-## 健康检查
-
-接口：
-
-```text
 GET /api/v1/health
 ```
 
-返回里会包含：
+### 模板管理
 
-- `database`：数据库是否可用
-- `ftp`：存储层是否可用
-- `ftp_mode`：当前是 `mock_only` 还是 `remote+mock`
-- `mock_ftp_dir`：本地模拟 FTP 目录
-
-## 模板使用说明
-
-### 1. 导入私有模板
-
-接口：
-
-```text
-POST /api/v1/templates/import
+```
+POST /api/v1/templates/import          # 导入私有模板（需 X-LLM-API-Key）
+POST /api/v1/templates/import-builtin   # 导入公共模板
+GET  /api/v1/templates                  # 查询模板列表
+GET  /api/v1/templates/{template_id}    # 查询模板详情
 ```
 
-请求头：
+### 任务管理
 
-```text
-X-LLM-API-Key: 你的 API Key
+```
+POST /api/v1/tasks                      # 创建生成任务
+GET  /api/v1/tasks                      # 查询任务列表
+GET  /api/v1/tasks/{task_id}            # 查询任务详情
+GET  /api/v1/tasks/{task_id}/pages      # 查询分页状态
+GET  /api/v1/tasks/{task_id}/events     # 查询任务事件
+GET  /api/v1/tasks/{task_id}/artifacts  # 查询任务产物
+POST /api/v1/tasks/{task_id}/stop       # 停止任务
+POST /api/v1/tasks/{task_id}/resume     # 恢复任务
+GET  /api/v1/tasks/{task_id}/download   # 下载 PPTX
 ```
 
-表单参数：
-
-- `template_name`
-- `template_file`
-
-说明：
-
-- 这个接口用于导入**当前调用方自己的模板**
-- 导入后的模板只有同一个 `X-LLM-API-Key` 才能使用
-
-### 2. 导入公共基础模板
-
-接口：
-
-```text
-POST /api/v1/templates/import-builtin
-```
-
-这个接口**不需要** `X-LLM-API-Key`。
-
-你有两种用法：
-
-- 不传文件：直接导入或复用根目录的 `templete.pptx`
-- 传 `template_file`：把上传的模板导入成所有人可用的公共模板
-
-可选表单参数：
-
-- `template_name`
-- `template_file`
-
-说明：
-
-- 这个接口用于导入**所有人都可使用的基础模板**
-- 导入后的模板会作为 `is_builtin=1` 的公共模板存在
-
-### 3. 查询模板
-
-接口：
-
-```text
-GET /api/v1/templates
-GET /api/v1/templates/{template_id}
-```
-
-说明：
-
-- 不带 `X-LLM-API-Key` 时，可以看到公共基础模板
-- 带 `X-LLM-API-Key` 时，还可以看到你自己的私有模板
-
-## 创建任务
-
-接口：
-
-```text
-POST /api/v1/tasks
-```
-
-请求头：
-
-```text
-X-LLM-API-Key: 你的 API Key
-```
-
-请求体示例：
+### 创建任务请求示例
 
 ```json
 {
   "requirement_text": "请生成一份介绍智能制造平台方案的 PPT",
   "template_id": null,
   "options": {
-    "output_filename": "demo.pptx"
+    "output_filename": "demo.pptx",
+    "model": "qwen3.6-27b",
+    "enable_thinking": false
   }
 }
 ```
 
-说明：
+**`options` 字段说明：**
 
-- `template_id` 可不传
-- 不传时，服务会自动使用默认基础模板
+- `output_filename`：最终输出文件名建议
+- `model`：LLM 模型名称（不传则使用 env 默认 `LLM_MODEL`）
+- `enable_thinking`：是否启用模型思考模式（默认 false）
+- `max_page_concurrency`：单任务分页最大并发数
+- `keep_artifacts`：是否保留中间产物到 FTP
 
-## 查询任务
+所有请求需带请求头 `X-LLM-API-Key`。
 
-接口：
+## 本地调试
 
-```text
-GET /api/v1/tasks
-GET /api/v1/tasks/{task_id}
-GET /api/v1/tasks/{task_id}/pages
-GET /api/v1/tasks/{task_id}/events
-GET /api/v1/tasks/{task_id}/artifacts
+- 不配置 `FTP_HOST` 时自动使用 `mock_ftp/` 作为本地存储
+- 设置 `MOCK_FTP_ENABLED=false` 可关闭 mock_ftp 文件写入
+- `runtime/` 中的任务目录在任务完成（或失败）后自动清理
+- 产物可在 `mock_ftp/slides_gen_server/tasks/` 中查看
+
+## 测试
+
+```bash
+uv run pytest tests/ -x -q
 ```
 
-## 停止与恢复任务
+## 开发文档
 
-接口：
-
-```text
-POST /api/v1/tasks/{task_id}/stop
-POST /api/v1/tasks/{task_id}/resume
-```
-
-## 下载结果
-
-接口：
-
-```text
-GET /api/v1/tasks/{task_id}/download
-```
-
-只有当任务状态为 `completed` 时才能下载。
-
-## 本地调试查看产物
-
-无论是否配置真实 FTP，服务都会把产物同步到本地模拟目录。
-
-你可以重点查看：
-
-- `mock_ftp/slides_gen_server/templates/`
-- `mock_ftp/slides_gen_server/tasks/`
-
-这里面会有：
-
-- 导入后的模板源文件
-- 模板 SVG
-- 任务分析 JSON
-- 生成后的 SVG
-- 最终 PPTX
+- [开发说明](docs/development_notes.md)
+- [架构设计](docs/fastapi_service_architecture.md)
+- [持久化设计](docs/mysql_ftp_persistence_design_v2.md)
