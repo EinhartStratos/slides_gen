@@ -3,7 +3,6 @@ from __future__ import annotations
 import json
 import logging
 import re
-import traceback
 
 import httpx2
 
@@ -38,11 +37,14 @@ class OpenAILikePageGenerationClient(BasePageGenerationClient):
         user_prompt: str,
         use_json: bool = False,
         stream: bool = True,
+        model: str | None = None,
+        enable_thinking: bool = False,
     ) -> str:
         payload: dict = {
-            "model": self.settings.llm_model,
+            "model": model or self.settings.llm_model,
             "temperature": 0.2,
             "stream": stream,
+            "enable_thinking": enable_thinking,
             "messages": [
                 {"role": "system", "content": system_prompt},
                 {"role": "user", "content": user_prompt},
@@ -63,7 +65,6 @@ class OpenAILikePageGenerationClient(BasePageGenerationClient):
 
     def _call_stream(self, payload: dict, headers: dict, timeout: httpx2.Timeout) -> str:
         content_parts: list[str] = []
-        print(self._api_url)
         with httpx2.Client(timeout=timeout) as client:
             with client.stream(
                 "POST",
@@ -91,7 +92,6 @@ class OpenAILikePageGenerationClient(BasePageGenerationClient):
 
     def _call_non_stream(self, payload: dict, headers: dict, timeout: httpx2.Timeout) -> str:
         payload["stream"] = False
-        print(self._api_url)
         with httpx2.Client(timeout=timeout) as client:
             response = client.post(self._api_url, json=payload, headers=headers)
             response.raise_for_status()
@@ -106,30 +106,40 @@ class OpenAILikePageGenerationClient(BasePageGenerationClient):
         page_name: str,
         svg_content: str,
         total_pages: int = 0,
+        model: str | None = None,
+        enable_thinking: bool = False,
     ) -> PagePlanResult:
         if not self.enabled or not api_key.strip():
             return self._plan_fallback_single(page_no, page_name, total_pages)
-        try:
-            content = self._call_llm(
-                api_key=api_key,
-                system_prompt=self.prompt_builder.build_plan_system_prompt(),
-                user_prompt=self.prompt_builder.build_plan_user_prompt(
-                    requirement_text=requirement_text,
-                    page_no=page_no,
-                    page_name=page_name,
-                    svg_content=svg_content,
-                ),
-                use_json=True,
-                stream=False,
-            )
-            logger.info("LLM 页面规划返回 (page=%s): %s", page_no, content[:200])
-            plan = self._parse_single_plan_response(content, page_no, page_name)
-            if not plan.should_generate:
-                logger.info("第 %s 页跳过，原因: %s", page_no, plan.skip_reason)
-            return plan
-        except Exception as exc:
-            logger.warning("LLM 页面规划失败 (page=%s)，回退启发式逻辑: %s", page_no, traceback.format_exc())
-            return self._plan_fallback_single(page_no, page_name, total_pages)
+        max_retries = 3
+        for attempt in range(1, max_retries + 1):
+            try:
+                content = self._call_llm(
+                    api_key=api_key,
+                    system_prompt=self.prompt_builder.build_plan_system_prompt(),
+                    user_prompt=self.prompt_builder.build_plan_user_prompt(
+                        requirement_text=requirement_text,
+                        page_no=page_no,
+                        page_name=page_name,
+                        svg_content=svg_content,
+                    ),
+                    use_json=True,
+                    stream=True,
+                    model=model,
+                    enable_thinking=enable_thinking,
+                )
+                logger.info("LLM 页面规划返回 (page=%s): %s", page_no, content[:200])
+                plan = self._parse_single_plan_response(content, page_no, page_name)
+                if not plan.should_generate:
+                    logger.info("第 %s 页跳过，原因: %s", page_no, plan.skip_reason)
+                return plan
+            except Exception as exc:
+                logger.warning("LLM 页面规划失败 (page=%s, attempt=%s/%s): %s", page_no, attempt, max_retries, exc)
+                if attempt < max_retries:
+                    import time
+                    time.sleep(2 * attempt)
+        logger.warning("LLM 页面规划重试 %s 次仍失败 (page=%s)，回退启发式逻辑", max_retries, page_no)
+        return self._plan_fallback_single(page_no, page_name, total_pages)
 
     def generate_page_svg(
         self,
@@ -140,36 +150,50 @@ class OpenAILikePageGenerationClient(BasePageGenerationClient):
         page_type: str,
         page_title: str,
         svg_content: str,
+        model: str | None = None,
+        enable_thinking: bool = False,
     ) -> PageGenerationResult:
         if not self.enabled or not api_key.strip():
             return self._generate_fallback(page_no, page_name)
-        try:
-            content = self._call_llm(
-                api_key=api_key,
-                system_prompt=self.prompt_builder.build_generate_system_prompt(page_type),
-                user_prompt=self.prompt_builder.build_generate_user_prompt(
-                    requirement_text=requirement_text,
+        max_retries = 3
+        for attempt in range(1, max_retries + 1):
+            try:
+                content = self._call_llm(
+                    api_key=api_key,
+                    system_prompt=self.prompt_builder.build_generate_system_prompt(page_type),
+                    user_prompt=self.prompt_builder.build_generate_user_prompt(
+                        requirement_text=requirement_text,
+                        page_no=page_no,
+                        page_name=page_name,
+                        page_type=page_type,
+                        page_title=page_title,
+                        svg_content=svg_content,
+                    ),
+                    model=model,
+                    enable_thinking=enable_thinking,
+                )
+                svg_text = self._extract_svg(content)
+                if not svg_text:
+                    logger.warning("LLM 返回内容中未找到有效 SVG (page=%s, attempt=%s/%s)", page_no, attempt, max_retries)
+                    if attempt < max_retries:
+                        import time
+                        time.sleep(2 * attempt)
+                        continue
+                    return self._generate_failed(page_no, page_name, raw_response=content)
+                return PageGenerationResult(
                     page_no=page_no,
                     page_name=page_name,
-                    page_type=page_type,
-                    page_title=page_title,
-                    svg_content=svg_content,
-                ),
-            )
-            svg_text = self._extract_svg(content)
-            if not svg_text:
-                logger.warning("LLM 返回内容中未找到有效 SVG，回退到原始模板 (page=%s)", page_no)
-                return self._generate_fallback(page_no, page_name, raw_response=content)
-            return PageGenerationResult(
-                page_no=page_no,
-                page_name=page_name,
-                generated_svg=svg_text,
-                decision_source="llm",
-                raw_response_text=content,
-            )
-        except Exception as exc:
-            logger.warning("LLM 页面生成失败，回退到原始模板 (page=%s): %s", page_no, exc)
-            return self._generate_fallback(page_no, page_name, raw_response=str(exc))
+                    generated_svg=svg_text,
+                    decision_source="llm",
+                    raw_response_text=content,
+                )
+            except Exception as exc:
+                logger.warning("LLM 页面生成失败 (page=%s, attempt=%s/%s): %s", page_no, attempt, max_retries, exc)
+                if attempt < max_retries:
+                    import time
+                    time.sleep(2 * attempt)
+        logger.warning("LLM 页面生成重试 %s 次仍失败 (page=%s)，该页将不输出", max_retries, page_no)
+        return self._generate_failed(page_no, page_name, raw_response="重试3次仍失败")
 
     @staticmethod
     def _parse_single_plan_response(content: str, page_no: int, page_name: str) -> PagePlanResult:
@@ -241,5 +265,15 @@ class OpenAILikePageGenerationClient(BasePageGenerationClient):
             page_name=page_name,
             generated_svg=None,
             decision_source="heuristic",
+            raw_response_text=raw_response,
+        )
+
+    @staticmethod
+    def _generate_failed(page_no: int, page_name: str, raw_response: str | None = None) -> PageGenerationResult:
+        return PageGenerationResult(
+            page_no=page_no,
+            page_name=page_name,
+            generated_svg=None,
+            decision_source="failed",
             raw_response_text=raw_response,
         )

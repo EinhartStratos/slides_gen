@@ -257,6 +257,7 @@ def test_settings(tmp_path):
         ftp_user="",
         ftp_password="",
         ftp_root_dir="/slides_gen_server",
+        mock_ftp_enabled=True,
         default_template_id=None,
         ppt_master_scripts_dir=tmp_path / "scripts",
         llm_base_url="",

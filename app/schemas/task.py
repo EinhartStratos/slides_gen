@@ -11,6 +11,8 @@ class GenerationOptionsSchema(SchemaModel):
     max_page_concurrency: Optional[int] = Field(default=None, description="单任务分页最大并发数")
     keep_artifacts: Optional[bool] = Field(default=None, description="是否保留中间产物到 FTP")
     output_filename: Optional[str] = Field(default=None, description="最终输出文件名建议")
+    model: Optional[str] = Field(default=None, description="LLM 模型名称；为空时使用环境变量默认模型")
+    enable_thinking: Optional[bool] = Field(default=False, description="是否启用模型思考模式")
 
 
 class CreateGenerationTaskRequest(SchemaModel):

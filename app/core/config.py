@@ -30,6 +30,7 @@ class Settings:
     ftp_user: str
     ftp_password: str
     ftp_root_dir: str
+    mock_ftp_enabled: bool
     default_template_id: str | None
     ppt_master_scripts_dir: Path
     llm_base_url: str
@@ -75,6 +76,7 @@ def get_settings() -> Settings:
         ftp_user=_get("FTP_USER", ""),
         ftp_password=_get("FTP_PASSWORD", ""),
         ftp_root_dir=_get("FTP_ROOT_DIR", "/slides_gen_server"),
+        mock_ftp_enabled=_get("MOCK_FTP_ENABLED", "true").lower() in ("true", "1", "yes"),
         default_template_id=_get("DEFAULT_TEMPLATE_ID", "") or None,
         ppt_master_scripts_dir=ROOT_DIR / "app" / "vendor" / "ppt_master" / "scripts",
         llm_base_url=_get("LLM_BASE_URL", _get("HOST", "")).rstrip("/"),

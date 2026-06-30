@@ -2,6 +2,8 @@ from __future__ import annotations
 
 from datetime import datetime
 import json
+import logging
+import shutil
 
 from app.core.constants import (
     ARTIFACT_TYPE_ANALYSIS_JSON,
@@ -30,6 +32,9 @@ from app.services.slide_generation_service import SlideGenerationService
 from app.services.svg_validation_service import SvgValidationService
 from app.services.task_service import TaskService
 from app.services.template_service import TemplateService
+
+
+logger = logging.getLogger(__name__)
 
 
 class OrchestrationService:
@@ -70,11 +75,25 @@ class OrchestrationService:
             self._sync_task_static_files(task, task_workspace)
             self._sync_template_snapshot_to_ftp(task, task_workspace)
 
+            request_payload = {}
+            raw_payload = task.get("request_payload_json")
+            if raw_payload:
+                try:
+                    request_payload = json.loads(raw_payload)
+                except Exception:
+                    request_payload = {}
+            options = request_payload.get("options") or {}
+            llm_model = options.get("model")
+            llm_enable_thinking = options.get("enable_thinking", False)
+
             existing_pages = {row["page_no"]: row for row in self.task_service.repository.list_pages(task_id)}
             total_pages = len(source_svgs)
             self.task_service.repository.update_task(task_id, {"total_pages": total_pages, "current_stage": "page_planning", "progress": 5})
 
-            page_plans = self.slide_service.plan_pages(api_key, str(task["requirement_text"]), source_svgs)
+            page_plans = self.slide_service.plan_pages(
+                api_key, str(task["requirement_text"]), source_svgs,
+                model=llm_model, enable_thinking=llm_enable_thinking,
+            )
             plan_path = self.slide_service.write_plan(task_workspace, page_plans)
             ftp_plan_path = self.ftp.upload_file(
                 plan_path,
@@ -200,7 +219,56 @@ class OrchestrationService:
                     continue
 
                 try:
-                    page_result = self.slide_service.generate_page_svg(api_key, str(task["requirement_text"]), index, source_svg, page_plan)
+                    page_result = self.slide_service.generate_page_svg(
+                        api_key, str(task["requirement_text"]), index, source_svg, page_plan,
+                        model=llm_model, enable_thinking=llm_enable_thinking,
+                    )
+
+                    if page_result.get("decision_source") == "failed":
+                        failed_pages += 1
+                        processed_pages += 1
+                        result_path = self.slide_service.write_page_result(task_workspace, index, page_result)
+                        ftp_analysis_path = self.ftp.upload_file(
+                            result_path,
+                            self.ftp.join(str(task["ftp_task_dir"]), "analysis", result_path.name),
+                        )
+                        self.task_service.create_artifact(
+                            task_id,
+                            ARTIFACT_TYPE_ANALYSIS_JSON,
+                            ftp_analysis_path,
+                            result_path.name,
+                            page_no=index,
+                            file_size_bytes=result_path.stat().st_size,
+                            content_type="application/json",
+                        )
+                        self.task_service.repository.upsert_page(
+                            {
+                                "task_id": task_id,
+                                "page_no": index,
+                                "page_name": page_name,
+                                "template_svg_ftp_path": template_svg_ftp_path,
+                                "analysis_json_ftp_path": ftp_analysis_path,
+                                "status": PAGE_STATUS_FAILED,
+                                "should_generate": 1,
+                                "error_message": "LLM 生成失败，重试3次仍不成功",
+                                "completed_at": datetime.now(),
+                            }
+                        )
+                        self.task_service.create_event(task_id, api_key, "page_failed", "page_generation", f"第 {index} 页 LLM 生成失败，跳过不输出", page_no=index)
+                        progress = 10 + (processed_pages / max(total_pages, 1)) * 80
+                        self.task_service.repository.update_task(
+                            task_id,
+                            {
+                                "processed_pages": processed_pages,
+                                "completed_pages": completed_pages,
+                                "skipped_pages": skipped_pages,
+                                "failed_pages": failed_pages,
+                                "progress": round(progress, 2),
+                                "last_heartbeat_at": datetime.now(),
+                            },
+                        )
+                        continue
+
                     result_path = self.slide_service.write_page_result(task_workspace, index, page_result)
                     ftp_analysis_path = self.ftp.upload_file(
                         result_path,
@@ -379,6 +447,13 @@ class OrchestrationService:
                 },
             )
             self.task_service.create_event(task_id, api_key, "failed", "failed", f"任务执行失败: {exc}")
+        finally:
+            try:
+                if task_workspace.root.exists():
+                    shutil.rmtree(task_workspace.root, ignore_errors=True)
+                    logger.info("已清理 runtime 任务目录: %s", task_workspace.root)
+            except Exception:
+                pass
 
     def _sync_task_static_files(self, task: dict, workspace) -> None:
         request_ftp = self.ftp.upload_file(workspace.request_json_path, str(task["ftp_request_path"]))

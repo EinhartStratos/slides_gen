@@ -18,7 +18,8 @@ class FtpStorage:
     def __init__(self, settings: Settings) -> None:
         self.settings = settings
         self.mock_root = settings.mock_ftp_dir
-        self.mock_root.mkdir(parents=True, exist_ok=True)
+        if settings.mock_ftp_enabled:
+            self.mock_root.mkdir(parents=True, exist_ok=True)
 
     @property
     def remote_enabled(self) -> bool:
@@ -68,7 +69,8 @@ class FtpStorage:
 
     def ensure_dir(self, remote_dir: str) -> str:
         normalized = self.normalize(remote_dir)
-        self.local_path(normalized).mkdir(parents=True, exist_ok=True)
+        if self.settings.mock_ftp_enabled:
+            self.local_path(normalized).mkdir(parents=True, exist_ok=True)
         if self.remote_enabled:
             with self.client() as ftp:
                 self._ensure_dir(ftp, normalized)
@@ -76,9 +78,10 @@ class FtpStorage:
 
     def upload_bytes(self, remote_path: str, payload: bytes) -> str:
         normalized = self.normalize(remote_path)
-        local_target = self.local_path(normalized)
-        local_target.parent.mkdir(parents=True, exist_ok=True)
-        local_target.write_bytes(payload)
+        if self.settings.mock_ftp_enabled:
+            local_target = self.local_path(normalized)
+            local_target.parent.mkdir(parents=True, exist_ok=True)
+            local_target.write_bytes(payload)
         if self.remote_enabled:
             with self.client() as ftp:
                 self._ensure_dir(ftp, posixpath.dirname(normalized))
@@ -87,9 +90,10 @@ class FtpStorage:
 
     def upload_file(self, local_path: Path, remote_path: str) -> str:
         normalized = self.normalize(remote_path)
-        local_target = self.local_path(normalized)
-        local_target.parent.mkdir(parents=True, exist_ok=True)
-        shutil.copy2(local_path, local_target)
+        if self.settings.mock_ftp_enabled:
+            local_target = self.local_path(normalized)
+            local_target.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copy2(local_path, local_target)
         if self.remote_enabled:
             with self.client() as ftp:
                 self._ensure_dir(ftp, posixpath.dirname(normalized))

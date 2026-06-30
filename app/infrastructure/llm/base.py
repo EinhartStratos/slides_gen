@@ -35,6 +35,9 @@ class BasePageGenerationClient(ABC):
         page_no: int,
         page_name: str,
         svg_content: str,
+        total_pages: int = 0,
+        model: str | None = None,
+        enable_thinking: bool = False,
     ) -> PagePlanResult:
         raise NotImplementedError
 
@@ -48,5 +51,7 @@ class BasePageGenerationClient(ABC):
         page_type: str,
         page_title: str,
         svg_content: str,
+        model: str | None = None,
+        enable_thinking: bool = False,
     ) -> PageGenerationResult:
         raise NotImplementedError

@@ -33,6 +33,8 @@ class SlideGenerationService:
         api_key: str,
         requirement_text: str,
         source_svgs: list[Path],
+        model: str | None = None,
+        enable_thinking: bool = False,
     ) -> list[dict]:
         total_pages = len(source_svgs)
         results: list[dict] = []
@@ -47,6 +49,8 @@ class SlideGenerationService:
                     page_name=page_name,
                     svg_content=svg_content,
                     total_pages=total_pages,
+                    model=model,
+                    enable_thinking=enable_thinking,
                 )
                 results.append(plan.model_dump(mode="json"))
             else:
@@ -79,6 +83,8 @@ class SlideGenerationService:
         page_no: int,
         source_svg_path: Path,
         page_plan: dict,
+        model: str | None = None,
+        enable_thinking: bool = False,
     ) -> dict:
         svg_content = source_svg_path.read_text(encoding="utf-8", errors="ignore")
         if self.generation_client is not None:
@@ -90,6 +96,8 @@ class SlideGenerationService:
                 page_type=page_plan.get("page_type", "content"),
                 page_title=page_plan.get("page_title", ""),
                 svg_content=svg_content,
+                model=model,
+                enable_thinking=enable_thinking,
             )
             return result.model_dump(mode="json")
         return {
