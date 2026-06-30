@@ -85,10 +85,28 @@ class TestGenerationOptionsSchema:
         assert opts.max_page_concurrency is None
         assert opts.keep_artifacts is None
         assert opts.output_filename is None
+        assert opts.model is None
+        assert opts.enable_thinking is False
 
     def test_partial(self):
         opts = GenerationOptionsSchema(output_filename="result.pptx")
         assert opts.output_filename == "result.pptx"
+
+    def test_model_and_enable_thinking(self):
+        opts = GenerationOptionsSchema(
+            model="qwen3.6-27b",
+            enable_thinking=True,
+        )
+        assert opts.model == "qwen3.6-27b"
+        assert opts.enable_thinking is True
+
+    def test_enable_thinking_default_false(self):
+        opts = GenerationOptionsSchema()
+        assert opts.enable_thinking is False
+
+    def test_model_default_none(self):
+        opts = GenerationOptionsSchema()
+        assert opts.model is None
 
 
 class TestTemplateSchemas:

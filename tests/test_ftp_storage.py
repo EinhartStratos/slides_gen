@@ -107,3 +107,59 @@ class TestFtpStorage:
         ftp = make_ftp(tmp_path)
         lp = ftp.local_path("/slides_gen_server/templates/tpl_001/source/template.pptx")
         assert lp == ftp.mock_root / "slides_gen_server" / "templates" / "tpl_001" / "source" / "template.pptx"
+
+
+def make_ftp_disabled(tmp_path) -> FtpStorage:
+    """创建 mock_ftp_enabled=false 的 FtpStorage 实例"""
+    settings = Settings(
+        app_name="test",
+        app_env="test",
+        api_prefix="/api/v1",
+        runtime_dir=tmp_path / "runtime",
+        mock_ftp_dir=tmp_path / "mock_ftp",
+        default_template_file=tmp_path / "templete.pptx",
+        db_host="",
+        db_port=3306,
+        db_user="",
+        db_password="",
+        db_schema="",
+        ftp_host="",
+        ftp_port=21,
+        ftp_user="",
+        ftp_password="",
+        ftp_root_dir="/slides_gen_server",
+        mock_ftp_enabled=False,
+        default_template_id=None,
+        ppt_master_scripts_dir=tmp_path / "scripts",
+        llm_base_url="",
+        llm_model="",
+        llm_timeout_seconds=10,
+    )
+    return FtpStorage(settings)
+
+
+class TestFtpStorageMockDisabled:
+    """MOCK_FTP_ENABLED=false 时不写本地 mock 目录"""
+
+    def test_upload_bytes_skips_local(self, tmp_path):
+        ftp = make_ftp_disabled(tmp_path)
+        remote = ftp.join(ftp.settings.ftp_root_dir, "test", "file.txt")
+        ftp.upload_bytes(remote, b"hello")
+        local = ftp.local_path(remote)
+        assert not local.exists()
+
+    def test_upload_file_skips_local(self, tmp_path):
+        ftp = make_ftp_disabled(tmp_path)
+        local_file = tmp_path / "local.txt"
+        local_file.write_text("content", encoding="utf-8")
+        remote = ftp.join(ftp.settings.ftp_root_dir, "uploaded", "local.txt")
+        ftp.upload_file(local_file, remote)
+        mock_file = ftp.local_path(remote)
+        assert not mock_file.exists()
+
+    def test_ensure_dir_skips_local(self, tmp_path):
+        ftp = make_ftp_disabled(tmp_path)
+        remote = ftp.join(ftp.settings.ftp_root_dir, "new_dir", "sub")
+        ftp.ensure_dir(remote)
+        local = ftp.local_path(remote)
+        assert not local.exists()
