@@ -312,18 +312,26 @@ def auth_headers(api_key):
 
 @pytest.fixture
 def curl_data():
-    """从 curl.txt 中提取请求体 JSON"""
+    """从 curl.txt 中提取请求体 JSON；文件不存在时使用 fallback 数据"""
     curl_path = Path("c:/AMD/slides_gen_server/curl.txt")
-    raw = curl_path.read_text(encoding="utf-8")
-    # 提取 --data '...' 中的 JSON
-    match = re.search(r"--data\s+'(\{.*?\})'\s*$", raw, re.DOTALL)
-    if match:
-        return json.loads(match.group(1))
-    # 兼容双引号
-    match = re.search(r'--data\s+"(\{.*?\})"\s*$', raw, re.DOTALL)
-    if match:
-        return json.loads(match.group(1))
-    raise ValueError("无法从 curl.txt 中提取 JSON 数据")
+    if curl_path.exists():
+        raw = curl_path.read_text(encoding="utf-8")
+        match = re.search(r"--data\s+'(\{.*?\})'\s*$", raw, re.DOTALL)
+        if match:
+            return json.loads(match.group(1))
+        match = re.search(r'--data\s+"(\{.*?\})"\s*$', raw, re.DOTALL)
+        if match:
+            return json.loads(match.group(1))
+    # fallback：本地 curl.txt 不存在（如 CI 环境）时使用内联数据
+    return {
+        "requirement_text": "请生成一份介绍智能制造平台方案的 PPT，内容涵盖平台概述、核心功能、技术架构、应用场景、实施路径和预期效益等方面，要求内容详实、逻辑清晰、数据支撑有力。",
+        "template_id": None,
+        "options": {
+            "output_filename": "demo.pptx",
+            "model": "qwen3.6-27b",
+            "enable_thinking": False,
+        },
+    }
 
 
 @pytest.fixture
