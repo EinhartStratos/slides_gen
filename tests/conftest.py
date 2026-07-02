@@ -324,7 +324,7 @@ def curl_data():
             return json.loads(match.group(1))
     # fallback：本地 curl.txt 不存在（如 CI 环境）时使用内联数据
     return {
-        "requirement_text": "请生成一份介绍智能制造平台方案的 PPT，内容涵盖平台概述、核心功能、技术架构、应用场景、实施路径和预期效益等方面，要求内容详实、逻辑清晰、数据支撑有力。",
+        "requirement_text": "请生成一份介绍智能制造平台方案的 PPT，内容涵盖平台概述、核心功能模块、技术架构设计、数据采集与处理流程、AI模型训练与推理pipeline、应用场景与行业案例、部署架构与运维监控、实施路径与里程碑规划、预期效益与ROI分析以及未来演进方向等方面，要求内容详实、逻辑清晰、数据支撑有力。",
         "template_id": None,
         "options": {
             "output_filename": "demo.pptx",
