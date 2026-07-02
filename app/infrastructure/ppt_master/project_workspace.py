@@ -32,6 +32,7 @@ class TaskWorkspace:
     analysis_dir: Path
     svg_output_dir: Path
     svg_final_dir: Path
+    structured_results_dir: Path
     validation_dir: Path
     exports_dir: Path
     assets_dir: Path
@@ -80,6 +81,7 @@ class ProjectWorkspace:
             analysis_dir=root / "analysis",
             svg_output_dir=root / "svg_output",
             svg_final_dir=root / "svg_final",
+            structured_results_dir=root / "structured_results",
             validation_dir=root / "validation",
             exports_dir=root / "exports",
             assets_dir=root / "assets",
@@ -109,6 +111,7 @@ class ProjectWorkspace:
             workspace.analysis_dir,
             workspace.svg_output_dir,
             workspace.svg_final_dir,
+            workspace.structured_results_dir,
             workspace.validation_dir,
             workspace.exports_dir,
             workspace.assets_dir,

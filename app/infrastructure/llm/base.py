@@ -5,6 +5,7 @@ from abc import ABC, abstractmethod
 from pydantic import Field
 
 from app.schemas.common import SchemaModel
+from app.schemas.structured_generation import StructuredPageResult
 
 
 class PagePlanResult(SchemaModel):
@@ -54,4 +55,17 @@ class BasePageGenerationClient(ABC):
         model: str | None = None,
         enable_thinking: bool = False,
     ) -> PageGenerationResult:
+        raise NotImplementedError
+
+    @abstractmethod
+    def generate_page_content(
+        self,
+        api_key: str,
+        requirement_text: str,
+        page_no: int,
+        page_name: str,
+        page_rule: dict,
+        model: str | None = None,
+        enable_thinking: bool = False,
+    ) -> StructuredPageResult:
         raise NotImplementedError

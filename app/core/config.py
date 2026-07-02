@@ -40,6 +40,7 @@ class Settings:
     llm_rate_limit_max_retries: int
     llm_rate_limit_base_delay: float
     llm_rate_limit_max_delay: float
+    svg_page_types: str
 
 
 def _get(key: str, default: str = "") -> str:
@@ -90,4 +91,5 @@ def get_settings() -> Settings:
         llm_rate_limit_max_retries=int(_get("LLM_RATE_LIMIT_MAX_RETRIES", "5") or "5"),
         llm_rate_limit_base_delay=float(_get("LLM_RATE_LIMIT_BASE_DELAY", "1.0") or "1.0"),
         llm_rate_limit_max_delay=float(_get("LLM_RATE_LIMIT_MAX_DELAY", "60.0") or "60.0"),
+        svg_page_types=_get("SVG_PAGE_TYPES", "diagram"),
     )

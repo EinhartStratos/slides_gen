@@ -273,6 +273,7 @@ def test_settings(tmp_path):
         llm_rate_limit_max_retries=3,
         llm_rate_limit_base_delay=0.1,
         llm_rate_limit_max_delay=1.0,
+        svg_page_types="diagram",
     )
 
 

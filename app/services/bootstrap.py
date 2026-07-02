@@ -9,7 +9,9 @@ from app.infrastructure.llm.prompt_builder import PageAnalysisPromptBuilder
 from app.services.builtin_template_service import BuiltinTemplateService
 from app.services.container import ServiceContainer
 from app.services.orchestration_service import OrchestrationService
+from app.services.pptx_builder_service import PptxBuilderService
 from app.services.pptx_export_service import PptxExportService
+from app.services.hybrid_pptx_exporter import HybridPptxExporter
 from app.services.slide_generation_service import SlideGenerationService
 from app.services.svg_validation_service import SvgValidationService
 from app.services.task_service import TaskService
@@ -27,6 +29,8 @@ class AppServices:
     slide_generation_service: SlideGenerationService
     svg_validation_service: SvgValidationService
     pptx_export_service: PptxExportService
+    pptx_builder_service: PptxBuilderService
+    hybrid_exporter: HybridPptxExporter
     orchestration_service: OrchestrationService
 
 
@@ -63,6 +67,8 @@ def build_services(settings: Settings) -> AppServices:
     slide_generation_service = SlideGenerationService(generation_client=generation_client)
     svg_validation_service = SvgValidationService()
     pptx_export_service = PptxExportService(container.svg_to_pptx)
+    pptx_builder_service = PptxBuilderService(generation_client=generation_client)
+    hybrid_exporter = HybridPptxExporter(settings=settings)
     orchestration_service = OrchestrationService(
         workspace=container.workspace,
         ftp=container.ftp,
@@ -71,6 +77,9 @@ def build_services(settings: Settings) -> AppServices:
         slide_service=slide_generation_service,
         svg_validation_service=svg_validation_service,
         pptx_export_service=pptx_export_service,
+        pptx_builder_service=pptx_builder_service,
+        hybrid_exporter=hybrid_exporter,
+        settings=settings,
     )
     return AppServices(
         container=container,
@@ -81,5 +90,7 @@ def build_services(settings: Settings) -> AppServices:
         slide_generation_service=slide_generation_service,
         svg_validation_service=svg_validation_service,
         pptx_export_service=pptx_export_service,
+        pptx_builder_service=pptx_builder_service,
+        hybrid_exporter=hybrid_exporter,
         orchestration_service=orchestration_service,
     )

@@ -12,6 +12,8 @@ from app.core.config import Settings
 from app.infrastructure.llm.base import BasePageGenerationClient, PagePlanResult, PageGenerationResult
 from app.infrastructure.llm.concurrency import get_global_semaphore
 from app.infrastructure.llm.prompt_builder import PageAnalysisPromptBuilder
+from app.infrastructure.llm.structured_prompt_builder import build_structured_system_prompt, build_structured_user_prompt
+from app.schemas.structured_generation import GeneratedElement, StructuredPageResult
 
 
 logger = logging.getLogger(__name__)
@@ -251,6 +253,82 @@ class OpenAILikePageGenerationClient(BasePageGenerationClient):
                     time_module.sleep(2 * attempt)
         logger.warning("LLM 页面生成重试 %s 次仍失败 (page=%s)，该页将不输出", max_retries, page_no)
         return self._generate_failed(page_no, page_name, raw_response="重试3次仍失败")
+
+    def generate_page_content(
+        self,
+        api_key: str,
+        requirement_text: str,
+        page_no: int,
+        page_name: str,
+        page_rule: dict,
+        model: str | None = None,
+        enable_thinking: bool = False,
+    ) -> StructuredPageResult:
+        """结构化内容生成：LLM 输出 JSON（文本/表格），不输出 SVG。"""
+        if not self.enabled or not api_key.strip():
+            return StructuredPageResult(
+                page_no=page_no,
+                should_generate=False,
+                skip_reason="LLM 未配置或 API Key 为空",
+                elements=[],
+            )
+        max_retries = 3
+        for attempt in range(1, max_retries + 1):
+            try:
+                content = self._call_llm(
+                    api_key=api_key,
+                    system_prompt=build_structured_system_prompt(),
+                    user_prompt=build_structured_user_prompt(requirement_text, page_rule),
+                    use_json=True,
+                    stream=True,
+                    model=model,
+                    enable_thinking=enable_thinking,
+                )
+                logger.info("LLM 结构化生成返回 (page=%s): %s", page_no, content[:200])
+                return self._parse_structured_result(content, page_no)
+            except Exception as exc:
+                logger.warning("LLM 结构化生成失败 (page=%s, attempt=%s/%s): %s", page_no, attempt, max_retries, exc)
+                if attempt < max_retries:
+                    time_module.sleep(2 * attempt)
+        logger.warning("LLM 结构化生成重试 %s 次仍失败 (page=%s)，返回跳过", max_retries, page_no)
+        return StructuredPageResult(
+            page_no=page_no,
+            should_generate=False,
+            skip_reason=f"LLM 结构化生成失败，重试{max_retries}次仍不成功",
+            elements=[],
+        )
+
+    @staticmethod
+    def _parse_structured_result(content: str, page_no: int) -> StructuredPageResult:
+        """解析 LLM 返回的结构化 JSON。"""
+        cleaned = content.strip()
+        if cleaned.startswith("```"):
+            lines = cleaned.splitlines()
+            if lines and lines[0].startswith("```"):
+                lines = lines[1:]
+            if lines and lines[-1].startswith("```"):
+                lines = lines[:-1]
+            cleaned = "\n".join(lines).strip()
+        data = json.loads(cleaned)
+        if isinstance(data, list):
+            data = data[0] if data else {}
+        if "page_no" not in data:
+            data["page_no"] = page_no
+        elements = []
+        for element_data in data.get("elements", []):
+            elements.append(GeneratedElement(
+                id=str(element_data.get("id", "")),
+                type=str(element_data.get("type", "text")),
+                content=element_data.get("content"),
+                headers=element_data.get("headers"),
+                rows=element_data.get("rows"),
+            ))
+        return StructuredPageResult(
+            page_no=int(data.get("page_no", page_no)),
+            should_generate=bool(data.get("should_generate", True)),
+            skip_reason=str(data.get("skip_reason", "")),
+            elements=elements,
+        )
 
     @staticmethod
     def _parse_single_plan_response(content: str, page_no: int, page_name: str) -> PagePlanResult:

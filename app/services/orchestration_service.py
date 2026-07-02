@@ -27,13 +27,17 @@ from app.core.constants import (
     TASK_STATUS_STOPPED,
 )
 from app.core.utils import json_dumps
+from app.core.config import Settings
 from app.infrastructure.ppt_master.project_workspace import ProjectWorkspace
 from app.infrastructure.storage.ftp import FtpStorage
+from app.services.hybrid_pptx_exporter import HybridPptxExporter
+from app.services.pptx_builder_service import PptxBuilderService
 from app.services.pptx_export_service import PptxExportService
 from app.services.slide_generation_service import SlideGenerationService
 from app.services.svg_validation_service import SvgValidationService
 from app.services.task_service import TaskService
 from app.services.template_service import TemplateService
+from app.schemas.structured_generation import StructuredPageResult
 
 
 logger = logging.getLogger(__name__)
@@ -49,6 +53,9 @@ class OrchestrationService:
         slide_service: SlideGenerationService,
         svg_validation_service: SvgValidationService,
         pptx_export_service: PptxExportService,
+        pptx_builder_service: PptxBuilderService | None = None,
+        hybrid_exporter: HybridPptxExporter | None = None,
+        settings: Settings | None = None,
     ) -> None:
         self.workspace = workspace
         self.ftp = ftp
@@ -57,6 +64,9 @@ class OrchestrationService:
         self.slide_service = slide_service
         self.svg_validation_service = svg_validation_service
         self.pptx_export_service = pptx_export_service
+        self.pptx_builder_service = pptx_builder_service
+        self.hybrid_exporter = hybrid_exporter
+        self.settings = settings
 
     async def run_task(self, api_key: str, task_id: str) -> None:
         task = self.task_service.get_task(api_key, task_id)
@@ -96,11 +106,34 @@ class OrchestrationService:
             counters = {"processed": 0, "completed": 0, "skipped": 0, "failed": 0}
             all_plans: dict[int, dict] = {}
 
+            # 解析模板规则（用于结构化填充）
+            template_rules: dict | None = None
+            if self.pptx_builder_service is not None:
+                try:
+                    template_pptx_path = self.template_service.get_template_pptx_path(template)
+                    template_rules = self.pptx_builder_service.parse_template_rules(
+                        template_pptx_path,
+                        task_workspace.analysis_dir / "template_rules.json",
+                    )
+                    logger.info("模板规则解析完成，共 %d 页", len(template_rules.get("pages", [])))
+                except Exception as exc:
+                    logger.warning("模板规则解析失败，所有页面将走 SVG 路径: %s", exc)
+
+            # 收集各页的结果（用于混合导出）
+            svg_pages: dict[int, Path] = {}
+            structured_pages: dict[int, StructuredPageResult] = {}
+            skipped_pages: set[int] = set()
+
             self.task_service.repository.update_task(task_id, {"current_stage": "page_generation", "progress": 10})
 
             with ThreadPoolExecutor(max_workers=max(total_pages, 1), thread_name_prefix=f"task-{task_id}") as executor:
                 futures = {}
                 for index, source_svg in enumerate(source_svgs, start=1):
+                    page_rule = None
+                    if template_rules is not None:
+                        pages_list = template_rules.get("pages", [])
+                        if index <= len(pages_list):
+                            page_rule = pages_list[index - 1]
                     future = executor.submit(
                         self._process_one_page,
                         api_key=api_key,
@@ -117,6 +150,11 @@ class OrchestrationService:
                         counters=counters,
                         lock=lock,
                         all_plans=all_plans,
+                        template_rules=template_rules,
+                        page_rule=page_rule,
+                        svg_pages=svg_pages,
+                        structured_pages=structured_pages,
+                        skipped_pages=skipped_pages,
                     )
                     futures[index] = future
 
@@ -187,7 +225,20 @@ class OrchestrationService:
                 return
 
             self.task_service.repository.update_task(task_id, {"current_stage": "exporting", "progress": 90})
-            result_pptx_path = self.pptx_export_service.export(task_workspace.svg_final_dir, task_workspace.result_pptx_path)
+
+            # 混合导出：如果有结构化页面，使用 HybridPptxExporter；否则回退到纯 SVG 导出
+            if self.hybrid_exporter is not None and template_rules is not None and (structured_pages or skipped_pages):
+                template_pptx_path = self.template_service.get_template_pptx_path(template)
+                result_pptx_path = self.hybrid_exporter.export(
+                    template_pptx_path=template_pptx_path,
+                    template_rules=template_rules,
+                    svg_pages=svg_pages,
+                    structured_pages=structured_pages,
+                    skipped_pages=skipped_pages,
+                    output_path=task_workspace.result_pptx_path,
+                )
+            else:
+                result_pptx_path = self.pptx_export_service.export(task_workspace.svg_final_dir, task_workspace.result_pptx_path)
             ftp_result_pptx_path = self.ftp.upload_file(result_pptx_path, str(task["ftp_result_pptx_path"]))
             self.task_service.create_artifact(
                 task_id,
@@ -251,8 +302,13 @@ class OrchestrationService:
         counters: dict,
         lock: threading.Lock,
         all_plans: dict,
+        template_rules: dict | None = None,
+        page_rule: dict | None = None,
+        svg_pages: dict | None = None,
+        structured_pages: dict | None = None,
+        skipped_pages: set | None = None,
     ) -> None:
-        """单页完整处理：规划 → 生成 → 渲染 → 校验 → 上传。线程安全。"""
+        """单页完整处理：规划 → 生成（SVG 或结构化）→ 渲染 → 校验 → 上传。线程安全。"""
 
         latest_task = self.task_service.get_task(api_key, task_id)
         if latest_task["stop_requested"]:
@@ -334,7 +390,37 @@ class OrchestrationService:
             )
             self.task_service.create_event(task_id, api_key, "page_skipped", "page_generation", f"第 {page_no} 页跳过: {page_plan.get('skip_reason', '')}", page_no=page_no)
             with lock:
+                if skipped_pages is not None:
+                    skipped_pages.add(page_no)
                 self._update_progress(task_id, counters, total_pages)
+            return
+
+        # 判断生成方式：根据 page_type 决定走 SVG 还是结构化填充
+        page_type = page_plan.get("page_type", "content")
+        svg_page_types = set()
+        if self.settings is not None:
+            svg_page_types = {t.strip() for t in self.settings.svg_page_types.split(",") if t.strip()}
+        use_svg = page_type in svg_page_types or template_rules is None or page_rule is None or self.pptx_builder_service is None
+
+        if not use_svg:
+            # 结构化填充路径
+            self._process_structured_page(
+                api_key=api_key,
+                task_id=task_id,
+                requirement_text=requirement_text,
+                page_no=page_no,
+                page_name=page_name,
+                page_rule=page_rule,
+                llm_model=llm_model,
+                llm_enable_thinking=llm_enable_thinking,
+                task_workspace=task_workspace,
+                task=task,
+                template_svg_ftp_path=template_svg_ftp_path,
+                counters=counters,
+                lock=lock,
+                structured_pages=structured_pages,
+                skipped_pages=skipped_pages,
+            )
             return
 
         try:
@@ -447,6 +533,8 @@ class OrchestrationService:
                 counters["processed"] += 1
                 if validation_status == "passed":
                     counters["completed"] += 1
+                    if svg_pages is not None:
+                        svg_pages[page_no] = final_svg_path
                     self.task_service.create_event(task_id, api_key, "page_completed", "page_generation", f"第 {page_no} 页已完成", page_no=page_no)
                 else:
                     counters["failed"] += 1
@@ -470,6 +558,116 @@ class OrchestrationService:
             self.task_service.create_event(task_id, api_key, "page_failed", "page_generation", f"第 {page_no} 页失败: {exc}", page_no=page_no)
             with lock:
                 self._update_progress(task_id, counters, total_pages)
+
+    def _process_structured_page(
+        self,
+        api_key: str,
+        task_id: str,
+        requirement_text: str,
+        page_no: int,
+        page_name: str,
+        page_rule: dict,
+        llm_model: str | None,
+        llm_enable_thinking: bool,
+        task_workspace,
+        task: dict,
+        template_svg_ftp_path: str,
+        counters: dict,
+        lock: threading.Lock,
+        structured_pages: dict | None = None,
+        skipped_pages: set | None = None,
+    ) -> None:
+        """结构化填充路径：LLM 输出 JSON → 保存结果 → 记录到 structured_pages。"""
+        try:
+            result = self.pptx_builder_service.generate_page_content(
+                api_key=api_key,
+                requirement_text=requirement_text,
+                page_no=page_no,
+                page_name=page_name,
+                page_rule=page_rule,
+                model=llm_model,
+                enable_thinking=llm_enable_thinking,
+            )
+
+            if not result.should_generate:
+                with lock:
+                    counters["processed"] += 1
+                    counters["skipped"] += 1
+                    if skipped_pages is not None:
+                        skipped_pages.add(page_no)
+                result_path = self.pptx_builder_service.save_page_result(task_workspace, page_no, result)
+                ftp_result_path = self.ftp.upload_file(
+                    result_path,
+                    self.ftp.join(str(task["ftp_task_dir"]), "structured_results", result_path.name),
+                )
+                self.task_service.repository.upsert_page(
+                    {
+                        "task_id": task_id,
+                        "page_no": page_no,
+                        "page_name": page_name,
+                        "template_svg_ftp_path": template_svg_ftp_path,
+                        "status": PAGE_STATUS_SKIPPED,
+                        "should_generate": 0,
+                        "skip_reason": result.skip_reason,
+                        "completed_at": datetime.now(),
+                    }
+                )
+                self.task_service.create_event(task_id, api_key, "page_skipped", "page_generation", f"第 {page_no} 页跳过: {result.skip_reason}", page_no=page_no)
+                with lock:
+                    self._update_progress(task_id, counters, total_pages=1)
+                return
+
+            result_path = self.pptx_builder_service.save_page_result(task_workspace, page_no, result)
+            ftp_result_path = self.ftp.upload_file(
+                result_path,
+                self.ftp.join(str(task["ftp_task_dir"]), "structured_results", result_path.name),
+            )
+            self.task_service.create_artifact(
+                task_id,
+                "structured_result",
+                ftp_result_path,
+                result_path.name,
+                page_no=page_no,
+                file_size_bytes=result_path.stat().st_size,
+                content_type="application/json",
+            )
+            self.task_service.repository.upsert_page(
+                {
+                    "task_id": task_id,
+                    "page_no": page_no,
+                    "page_name": page_name,
+                    "template_svg_ftp_path": template_svg_ftp_path,
+                    "status": PAGE_STATUS_COMPLETED,
+                    "should_generate": 1,
+                    "completed_at": datetime.now(),
+                }
+            )
+            with lock:
+                counters["processed"] += 1
+                counters["completed"] += 1
+                if structured_pages is not None:
+                    structured_pages[page_no] = result
+            self.task_service.create_event(task_id, api_key, "page_completed", "page_generation", f"第 {page_no} 页结构化生成完成", page_no=page_no)
+            with lock:
+                self._update_progress(task_id, counters, total_pages=1)
+        except Exception as exc:
+            with lock:
+                counters["processed"] += 1
+                counters["failed"] += 1
+            self.task_service.repository.upsert_page(
+                {
+                    "task_id": task_id,
+                    "page_no": page_no,
+                    "page_name": page_name,
+                    "template_svg_ftp_path": template_svg_ftp_path,
+                    "status": PAGE_STATUS_FAILED,
+                    "error_message": str(exc),
+                    "completed_at": datetime.now(),
+                }
+            )
+            self.task_service.create_event(task_id, api_key, "page_failed", "page_generation", f"第 {page_no} 页结构化生成失败: {exc}", page_no=page_no)
+            with lock:
+                self._update_progress(task_id, counters, total_pages=1)
 
     def _update_progress(self, task_id: str, counters: dict, total_pages: int) -> None:
         """更新任务进度（调用方需持有 lock）。"""

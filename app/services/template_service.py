@@ -90,6 +90,16 @@ class TemplateService:
         workspace.manifest_path.write_text(str(manifest), encoding="utf-8")
         return workspace
 
+    def get_template_pptx_path(self, template: dict) -> Path:
+        """获取模板 PPTX 的本地路径，如果不存在则从 FTP 下载。"""
+        workspace = self.ensure_local_template_workspace(template)
+        if not workspace.source_pptx.exists():
+            source_ftp_path = template.get("source_ftp_path")
+            if not source_ftp_path:
+                raise NotFoundError(f"模板缺少源文件路径: {template['template_id']}")
+            self.ftp.download_file(str(source_ftp_path), workspace.source_pptx)
+        return workspace.source_pptx
+
     def copy_flat_svgs_to_task_snapshot(self, template: dict, target_dir: Path, assets_target_dir: Path) -> list[Path]:
         workspace = self.ensure_local_template_workspace(template)
         target_dir.mkdir(parents=True, exist_ok=True)

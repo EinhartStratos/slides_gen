@@ -2,7 +2,12 @@
 
 ## 简介
 
-基于 FastAPI 的 PPT 自动生成服务。核心流程：将 PPTX 模板转为逐页 SVG → LLM 逐页规划与生成新 SVG → 校验后转回可编辑 PPTX。
+基于 FastAPI 的 PPT 自动生成服务。核心流程：将 PPTX 模板转为逐页 SVG → LLM 逐页规划与生成 → 混合导出最终 PPTX。
+
+系统支持两种生成方式：
+
+- **SVG 生成**：LLM 生成 SVG → 转为可编辑 DrawingML 形状，适用于复杂图形页（架构图、流程图等）
+- **结构化填充**：LLM 输出结构化 JSON → 直接回填模板原生文本框和表格，适用于文本/表格页，速度快、编辑性好、支持自动拆页
 
 你可以：
 
@@ -49,6 +54,7 @@
 | `LLM_RATE_LIMIT_MAX_RETRIES` | 429/网络错误最大重试次数 | 5 |
 | `LLM_RATE_LIMIT_BASE_DELAY` | 退避基准延迟秒数 | 1.0 |
 | `LLM_RATE_LIMIT_MAX_DELAY` | 退避最大延迟秒数 | 60.0 |
+| `SVG_PAGE_TYPES` | 使用 SVG 生成的页面类型（逗号分隔），其余走结构化填充 | diagram |
 
 ## 安装与启动
 
@@ -66,19 +72,29 @@ uv run python -m uvicorn app.main:app --reload
 
 ```
 1. 创建任务 → 持久化到 MySQL
-2. 加载模板 → 复制模板 SVG 到任务工作区
+2. 加载模板 → 复制模板 SVG 到任务工作区 → 解析模板规则（TemplateRuleParser）
 3. 并发逐页处理（ThreadPoolExecutor + 全局信号量控制）
    ├─ 规划（LLM）→ 判断 should_generate / page_type / page_title
    │  - 封面、尾页、目录页始终生成
    │  - 无关页面跳过并记录 skip_reason
    │  - LLM 失败自动重试 3 次
-   ├─ 生成（LLM）→ 输出全新 SVG
-   │  - LLM 失败重试 3 次，仍失败则跳过该页不输出
-   └─ SVG 校验 → 写入 svg_output / svg_final
+   ├─ 按页面类型分流生成
+   │  ├─ SVG 路径（diagram 类型）
+   │  │  - LLM 生成 SVG → 校验 → 保存到 svg_final/
+   │  │  - 转为可编辑 DrawingML 形状（不渲染 PNG）
+   │  └─ 结构化路径（cover/toc/content/end 类型）
+   │     - LLM 输出结构化 JSON（文本/表格）
+   │     - 保存到 structured_results/
+   │     - 支持内容溢出自动拆页
    - 全局信号量限制所有任务 LLM 请求总并发数（MAX_LLM_CONCURRENCY）
    - 429 限流自动退避：优先读 Retry-After，无则指数退避+随机抖动
    - 网络错误自动退避重试
-4. 导出 PPTX
+4. 混合导出 PPTX
+   ├─ 以模板 PPTX 为基础
+   ├─ 结构化页面 → PPTBuilder 回填原生文本框/表格
+   ├─ SVG 页面 → convert_svg_to_slide_shapes 注入 DrawingML 可编辑形状
+   ├─ 删除跳过的页面 → 重排 slide 顺序
+   └─ 保存最终 PPTX
 5. 上传产物到 FTP → 清理 runtime 任务目录
 ```
 
@@ -157,3 +173,4 @@ uv run pytest tests/ -x -q
 - [架构设计](docs/fastapi_service_architecture.md)
 - [持久化设计](docs/mysql_ftp_persistence_design_v2.md)
 - [并发设计](docs/concurrency_design.md)
+- [混合生成设计](docs/hybrid_generation_design.md)
