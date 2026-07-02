@@ -6,6 +6,7 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 from app.core.config import Settings
+from app.infrastructure.llm.concurrency import init_global_semaphore, reset_global_semaphore
 from app.infrastructure.llm.openai_like_client import OpenAILikePageGenerationClient
 from app.infrastructure.llm.prompt_builder import PageAnalysisPromptBuilder
 
@@ -34,12 +35,18 @@ def make_settings(tmp_path) -> Settings:
         llm_base_url="https://test.api.host",
         llm_model="test-model",
         llm_timeout_seconds=10,
+        max_llm_concurrency=4,
+        llm_rate_limit_max_retries=3,
+        llm_rate_limit_base_delay=0.1,
+        llm_rate_limit_max_delay=1.0,
     )
 
 
 def make_client(tmp_path) -> OpenAILikePageGenerationClient:
     settings = make_settings(tmp_path)
     builder = PageAnalysisPromptBuilder()
+    reset_global_semaphore()
+    init_global_semaphore(settings.max_llm_concurrency)
     return OpenAILikePageGenerationClient(settings, builder)
 
 

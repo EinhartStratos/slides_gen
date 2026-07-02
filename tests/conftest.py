@@ -263,6 +263,10 @@ def test_settings(tmp_path):
         llm_base_url="",
         llm_model="",
         llm_timeout_seconds=10,
+        max_llm_concurrency=4,
+        llm_rate_limit_max_retries=3,
+        llm_rate_limit_base_delay=0.1,
+        llm_rate_limit_max_delay=1.0,
     )
 
 
