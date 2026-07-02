@@ -240,13 +240,19 @@ def test_settings(tmp_path):
     mock_ftp.mkdir(parents=True, exist_ok=True)
     runtime.mkdir(parents=True, exist_ok=True)
 
+    # 创建占位模板文件（CI 环境无 templete.pptx）
+    template_file = tmp_path / "templete.pptx"
+    if not template_file.exists():
+        from pptx import Presentation
+        Presentation().save(str(template_file))
+
     return Settings(
         app_name="test_slides_gen",
         app_env="test",
         api_prefix="/api/v1",
         runtime_dir=runtime,
         mock_ftp_dir=mock_ftp,
-        default_template_file=Path("c:/AMD/slides_gen_server/templete.pptx"),
+        default_template_file=template_file,
         db_host="localhost",
         db_port=3306,
         db_user="root",
