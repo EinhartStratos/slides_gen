@@ -46,7 +46,7 @@ API 层 (app/api/v1/endpoints/)
 
 ### 3.3 基础设施层
 
-- `infrastructure/llm/`：LLM 客户端（OpenAI 风格 API）
+- `infrastructure/llm/`：LLM 客户端（OpenAI 风格 API）+ 全局并发信号量
 - `infrastructure/db/`：MySQL 适配
 - `infrastructure/storage/ftp.py`：FTP/mock_ftp 存储
 - `infrastructure/ppt_master/`：PPT 转换适配器
@@ -59,9 +59,13 @@ POST /api/v1/tasks
 → 后台启动 orchestration_service.run_task()
 → 加载模板，复制 SVG 到任务工作区
 → 解析 options.model / options.enable_thinking
-→ 逐页规划（plan_single_page）→ JSON 结果
-→ 逐页生成（generate_page_svg）→ SVG 直出
-→ SVG 校验
+→ ThreadPoolExecutor 并发提交所有页面
+  每页独立处理：
+    规划（plan_single_page）→ JSON 结果
+    生成（generate_page_svg）→ SVG 直出
+    SVG 校验
+  全局信号量控制 LLM 请求总并发
+  429 限流退避 + 网络错误退避
 → 导出 PPTX
 → 上传产物到 FTP
 → 清理 runtime 任务目录
@@ -118,7 +122,24 @@ LLM 直接输出完整 SVG 代码（非 JSON）。
 - 重试 3 次，仍失败则 `decision_source=failed`
 - 失败页面不输出到最终 PPTX
 
-### 6.3 动态模型参数
+### 6.3 全局并发控制
+
+- **全局信号量**：`app/infrastructure/llm/concurrency.py` 提供 `threading.Semaphore`
+- **初始化**：`bootstrap.build_services()` 调用 `init_global_semaphore(MAX_LLM_CONCURRENCY)`
+- **作用范围**：所有任务的 LLM 请求（规划 + 生成）共享同一个信号量
+- **实现位置**：`_call_llm` 方法中 acquire/release，finally 确保释放
+- **重试期间**：信号量持续持有，避免重试导致并发数超限
+
+### 6.4 限流退避机制
+
+- **429 限流**：优先读 `Retry-After` 响应头，无则指数退避 + 随机抖动
+- **网络错误**：`ConnectError` / `ReadTimeout` / `WriteTimeout` 指数退避重试
+- **配置项**：
+  - `LLM_RATE_LIMIT_MAX_RETRIES`：最大重试次数
+  - `LLM_RATE_LIMIT_BASE_DELAY`：基准延迟
+  - `LLM_RATE_LIMIT_MAX_DELAY`：延迟上限
+
+### 6.5 动态模型参数
 
 - `options.model`：不传时使用 env `LLM_MODEL`
 - `options.enable_thinking`：不传时默认 `false`
@@ -229,6 +250,10 @@ DDL 文件：`sql/mysql_init_v2.sql`
 | `DEFAULT_TEMPLATE_FILE` | 默认模板 PPTX |
 | `DEFAULT_TEMPLATE_ID` | 默认模板 ID |
 | `LLM_TIMEOUT_SECONDS` | LLM 超时 |
+| `MAX_LLM_CONCURRENCY` | 全局 LLM 请求最大并发数 |
+| `LLM_RATE_LIMIT_MAX_RETRIES` | 429/网络错误最大重试次数 |
+| `LLM_RATE_LIMIT_BASE_DELAY` | 退避基准延迟秒数 |
+| `LLM_RATE_LIMIT_MAX_DELAY` | 退避最大延迟秒数 |
 
 ## 11. 测试
 
@@ -243,5 +268,6 @@ uv run pytest tests/ -x -q
 - 模板 API（导入、查询）
 - SVG 校验服务
 - LLM 客户端（重试逻辑、参数透传、SVG 提取）
+- 并发控制（全局信号量、429 退避、网络错误退避、退避计算）
 - Prompt 构建器
 - 幻灯片生成服务

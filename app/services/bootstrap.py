@@ -3,6 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 from app.core.config import Settings
+from app.infrastructure.llm.concurrency import init_global_semaphore
 from app.infrastructure.llm.openai_like_client import OpenAILikePageGenerationClient
 from app.infrastructure.llm.prompt_builder import PageAnalysisPromptBuilder
 from app.services.builtin_template_service import BuiltinTemplateService
@@ -30,6 +31,7 @@ class AppServices:
 
 
 def build_services(settings: Settings) -> AppServices:
+    init_global_semaphore(settings.max_llm_concurrency)
     container = ServiceContainer(settings)
     template_service = TemplateService(
         repository=container.templates,

@@ -36,6 +36,10 @@ class Settings:
     llm_base_url: str
     llm_model: str
     llm_timeout_seconds: int
+    max_llm_concurrency: int
+    llm_rate_limit_max_retries: int
+    llm_rate_limit_base_delay: float
+    llm_rate_limit_max_delay: float
 
 
 def _get(key: str, default: str = "") -> str:
@@ -82,4 +86,8 @@ def get_settings() -> Settings:
         llm_base_url=_get("LLM_BASE_URL", _get("HOST", "")).rstrip("/"),
         llm_model=_get("LLM_MODEL", _get("BASIC_MODEL", "")),
         llm_timeout_seconds=int(_get("LLM_TIMEOUT_SECONDS", "120") or "120"),
+        max_llm_concurrency=int(_get("MAX_LLM_CONCURRENCY", "8") or "8"),
+        llm_rate_limit_max_retries=int(_get("LLM_RATE_LIMIT_MAX_RETRIES", "5") or "5"),
+        llm_rate_limit_base_delay=float(_get("LLM_RATE_LIMIT_BASE_DELAY", "1.0") or "1.0"),
+        llm_rate_limit_max_delay=float(_get("LLM_RATE_LIMIT_MAX_DELAY", "60.0") or "60.0"),
     )

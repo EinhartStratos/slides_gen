@@ -41,40 +41,63 @@ class SlideGenerationService:
         for i, svg_path in enumerate(source_svgs, start=1):
             page_name = svg_path.stem
             svg_content = svg_path.read_text(encoding="utf-8", errors="ignore")
-            if self.generation_client is not None:
-                plan = self.generation_client.plan_single_page(
-                    api_key=api_key,
-                    requirement_text=requirement_text,
-                    page_no=i,
-                    page_name=page_name,
-                    svg_content=svg_content,
-                    total_pages=total_pages,
-                    model=model,
-                    enable_thinking=enable_thinking,
-                )
-                results.append(plan.model_dump(mode="json"))
-            else:
-                if i == 1:
-                    page_type = "cover"
-                elif i == total_pages:
-                    page_type = "end"
-                elif "目录" in page_name or "toc" in page_name.lower():
-                    page_type = "toc"
-                elif any(kw in page_name for kw in ["架构", "流程", "时序", "图"]):
-                    page_type = "diagram"
-                else:
-                    page_type = "content"
-                results.append({
-                    "page_no": i,
-                    "page_name": page_name,
-                    "should_generate": True,
-                    "skip_reason": "",
-                    "page_type": page_type,
-                    "page_title": page_name,
-                    "decision_source": "heuristic",
-                    "raw_response_text": None,
-                })
+            result = self.plan_single_page(
+                api_key=api_key,
+                requirement_text=requirement_text,
+                page_no=i,
+                page_name=page_name,
+                svg_content=svg_content,
+                total_pages=total_pages,
+                model=model,
+                enable_thinking=enable_thinking,
+            )
+            results.append(result)
         return results
+
+    def plan_single_page(
+        self,
+        api_key: str,
+        requirement_text: str,
+        page_no: int,
+        page_name: str,
+        svg_content: str,
+        total_pages: int = 0,
+        model: str | None = None,
+        enable_thinking: bool = False,
+    ) -> dict:
+        """对单页进行规划，返回 plan dict。"""
+        if self.generation_client is not None:
+            plan = self.generation_client.plan_single_page(
+                api_key=api_key,
+                requirement_text=requirement_text,
+                page_no=page_no,
+                page_name=page_name,
+                svg_content=svg_content,
+                total_pages=total_pages,
+                model=model,
+                enable_thinking=enable_thinking,
+            )
+            return plan.model_dump(mode="json")
+        if page_no == 1:
+            page_type = "cover"
+        elif total_pages > 0 and page_no == total_pages:
+            page_type = "end"
+        elif "目录" in page_name or "toc" in page_name.lower():
+            page_type = "toc"
+        elif any(kw in page_name for kw in ["架构", "流程", "时序", "图"]):
+            page_type = "diagram"
+        else:
+            page_type = "content"
+        return {
+            "page_no": page_no,
+            "page_name": page_name,
+            "should_generate": True,
+            "skip_reason": "",
+            "page_type": page_type,
+            "page_title": page_name,
+            "decision_source": "heuristic",
+            "raw_response_text": None,
+        }
 
     def generate_page_svg(
         self,

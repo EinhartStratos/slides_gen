@@ -45,6 +45,10 @@
 | `LLM_BASE_URL` | LLM API 基础 URL（同 HOST） | — |
 | `LLM_MODEL` | LLM 模型名称（同 BASIC_MODEL） | — |
 | `LLM_TIMEOUT_SECONDS` | LLM 请求超时秒数 | 120 |
+| `MAX_LLM_CONCURRENCY` | 全局 LLM 请求最大并发数（规划+生成共享） | 8 |
+| `LLM_RATE_LIMIT_MAX_RETRIES` | 429/网络错误最大重试次数 | 5 |
+| `LLM_RATE_LIMIT_BASE_DELAY` | 退避基准延迟秒数 | 1.0 |
+| `LLM_RATE_LIMIT_MAX_DELAY` | 退避最大延迟秒数 | 60.0 |
 
 ## 安装与启动
 
@@ -63,14 +67,19 @@ uv run python -m uvicorn app.main:app --reload
 ```
 1. 创建任务 → 持久化到 MySQL
 2. 加载模板 → 复制模板 SVG 到任务工作区
-3. 逐页规划（LLM）→ 判断 should_generate / page_type / page_title
-   - 封面、尾页、目录页始终生成
-   - 无关页面跳过并记录 skip_reason
-   - LLM 失败自动重试 3 次
-4. 逐页生成（LLM）→ 输出全新 SVG
-   - LLM 失败重试 3 次，仍失败则跳过该页不输出
-5. SVG 校验 → 导出 PPTX
-6. 上传产物到 FTP → 清理 runtime 任务目录
+3. 并发逐页处理（ThreadPoolExecutor + 全局信号量控制）
+   ├─ 规划（LLM）→ 判断 should_generate / page_type / page_title
+   │  - 封面、尾页、目录页始终生成
+   │  - 无关页面跳过并记录 skip_reason
+   │  - LLM 失败自动重试 3 次
+   ├─ 生成（LLM）→ 输出全新 SVG
+   │  - LLM 失败重试 3 次，仍失败则跳过该页不输出
+   └─ SVG 校验 → 写入 svg_output / svg_final
+   - 全局信号量限制所有任务 LLM 请求总并发数（MAX_LLM_CONCURRENCY）
+   - 429 限流自动退避：优先读 Retry-After，无则指数退避+随机抖动
+   - 网络错误自动退避重试
+4. 导出 PPTX
+5. 上传产物到 FTP → 清理 runtime 任务目录
 ```
 
 ## API 接口
@@ -123,8 +132,9 @@ GET  /api/v1/tasks/{task_id}/download   # 下载 PPTX
 - `output_filename`：最终输出文件名建议
 - `model`：LLM 模型名称（不传则使用 env 默认 `LLM_MODEL`）
 - `enable_thinking`：是否启用模型思考模式（默认 false）
-- `max_page_concurrency`：单任务分页最大并发数
 - `keep_artifacts`：是否保留中间产物到 FTP
+
+> **注意**：并发控制由全局环境变量 `MAX_LLM_CONCURRENCY` 统一管理，所有任务共享一个信号量。
 
 所有请求需带请求头 `X-LLM-API-Key`。
 
@@ -146,3 +156,4 @@ uv run pytest tests/ -x -q
 - [开发说明](docs/development_notes.md)
 - [架构设计](docs/fastapi_service_architecture.md)
 - [持久化设计](docs/mysql_ftp_persistence_design_v2.md)
+- [并发设计](docs/concurrency_design.md)

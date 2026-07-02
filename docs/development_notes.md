@@ -22,6 +22,7 @@ app/
 │  ├─ llm/                  LLM 客户端
 │  │  ├─ base.py            抽象接口 + Pydantic 模型
 │  │  ├─ openai_like_client.py  OpenAI 风格 API 客户端（httpx2）
+│  │  ├─ concurrency.py     全局信号量管理
 │  │  └─ prompt_builder.py  规划和生成 prompt 构建器
 │  └─ ppt_master/           PPTX↔SVG 转换引擎
 │     ├─ project_workspace.py
@@ -58,12 +59,17 @@ app/
 run_task()
 ├─ 加载模板，复制 SVG 到任务工作区
 ├─ 解析 request_payload_json 获取 options.model / options.enable_thinking
-├─ 逐页规划 → plan_pages()
-├─ 逐页生成 → generate_page_svg()
-│  ├─ should_generate=false → 跳过，记录 skip_reason
-│  ├─ decision_source=failed → 跳过，记录错误
-│  └─ 正常生成 → 写入 svg_output / svg_final
-├─ SVG 校验
+├─ ThreadPoolExecutor 并发提交所有页面
+│  └─ _process_one_page(page_no)
+│     ├─ 规划（plan_single_page）→ LLM 返回 JSON
+│     ├─ should_generate=false → 跳过，记录 skip_reason
+│     ├─ 生成（generate_page_svg）→ LLM 返回 SVG
+│     ├─ decision_source=failed → 跳过，记录错误
+│     └─ 正常生成 → 写入 svg_output / svg_final
+├─ 全局信号量控制 LLM 请求总并发（MAX_LLM_CONCURRENCY）
+├─ 429 限流退避：Retry-After 优先，无则指数退避+抖动
+├─ 网络错误退避重试
+├─ 线程锁保护进度计数器
 ├─ 导出 PPTX
 ├─ 上传产物到 FTP
 └─ finally: 清理 runtime 任务目录
@@ -79,8 +85,11 @@ run_task()
 
 ### 3.2 重试机制
 
-- `plan_single_page` 和 `generate_page_svg` 均有 3 次重试
-- 重试间隔递增（2s、4s）
+- `plan_single_page` 和 `generate_page_svg` 均有 3 次外层重试
+- `_call_llm` 内层有独立的限流退避重试（`LLM_RATE_LIMIT_MAX_RETRIES`）
+- 429 限流：优先读 `Retry-After` 头，无则指数退避 + 随机抖动
+- 网络错误（ConnectError / ReadTimeout / WriteTimeout）：指数退避重试
+- 退避延迟上限由 `LLM_RATE_LIMIT_MAX_DELAY` 控制
 - 规划失败回退启发式；生成失败标记为 `failed` 不输出
 
 ### 3.3 流式支持
@@ -88,6 +97,14 @@ run_task()
 - 使用 `httpx2` 库
 - 规划和生成均支持流式返回（`stream=True`）
 - SSE 格式解析 `data: {...}` 行
+
+### 3.4 全局并发控制
+
+- `app/infrastructure/llm/concurrency.py` 提供全局信号量
+- `bootstrap.build_services()` 启动时调用 `init_global_semaphore(MAX_LLM_CONCURRENCY)`
+- 所有 LLM 请求（规划 + 生成，跨所有任务）共享同一个信号量
+- `_call_llm` 中 acquire/release，异常时也保证释放
+- 信号量在重试期间持续持有，避免重试时并发数超限
 
 ## 4. 存储策略
 
@@ -137,4 +154,5 @@ run_task()
 
 - `docs/fastapi_service_architecture.md`：架构设计
 - `docs/mysql_ftp_persistence_design_v2.md`：持久化设计
+- `docs/concurrency_design.md`：LLM 并发控制设计
 - `sql/mysql_init_v2.sql`：建表脚本
