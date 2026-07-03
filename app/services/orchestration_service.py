@@ -225,9 +225,12 @@ class OrchestrationService:
                 return
 
             self.task_service.repository.update_task(task_id, {"current_stage": "exporting", "progress": 90})
+            logger.info("开始导出阶段: structured_pages=%s, skipped_pages=%s, svg_pages=%s",
+                        len(structured_pages), len(skipped_pages), len(svg_pages))
 
             # 混合导出：如果有结构化页面，使用 HybridPptxExporter；否则回退到纯 SVG 导出
             if self.hybrid_exporter is not None and template_rules is not None and (structured_pages or skipped_pages):
+                logger.info("使用混合导出器, template_pptx=%s", template)
                 template_pptx_path = self.template_service.get_template_pptx_path(template)
                 result_pptx_path = self.hybrid_exporter.export(
                     template_pptx_path=template_pptx_path,
@@ -238,7 +241,9 @@ class OrchestrationService:
                     output_path=task_workspace.result_pptx_path,
                 )
             else:
+                logger.info("使用纯 SVG 导出器")
                 result_pptx_path = self.pptx_export_service.export(task_workspace.svg_final_dir, task_workspace.result_pptx_path)
+            logger.info("PPTX 导出完成: %s", result_pptx_path)
             ftp_result_pptx_path = self.ftp.upload_file(result_pptx_path, str(task["ftp_result_pptx_path"]))
             self.task_service.create_artifact(
                 task_id,
@@ -268,6 +273,7 @@ class OrchestrationService:
             )
             self.task_service.create_event(task_id, api_key, "exported", "completed", "最终 PPTX 已导出")
         except Exception as exc:
+            logger.error("任务执行失败: %s", exc, exc_info=True)
             self.task_service.repository.update_task(
                 task_id,
                 {
@@ -418,6 +424,7 @@ class OrchestrationService:
                 template_svg_ftp_path=template_svg_ftp_path,
                 counters=counters,
                 lock=lock,
+                total_pages=total_pages,
                 structured_pages=structured_pages,
                 skipped_pages=skipped_pages,
             )
@@ -574,6 +581,7 @@ class OrchestrationService:
         template_svg_ftp_path: str,
         counters: dict,
         lock: threading.Lock,
+        total_pages: int = 1,
         structured_pages: dict | None = None,
         skipped_pages: set | None = None,
     ) -> None:
@@ -614,7 +622,7 @@ class OrchestrationService:
                 )
                 self.task_service.create_event(task_id, api_key, "page_skipped", "page_generation", f"第 {page_no} 页跳过: {result.skip_reason}", page_no=page_no)
                 with lock:
-                    self._update_progress(task_id, counters, total_pages=1)
+                    self._update_progress(task_id, counters, total_pages)
                 return
 
             result_path = self.pptx_builder_service.save_page_result(task_workspace, page_no, result)
@@ -649,7 +657,7 @@ class OrchestrationService:
                     structured_pages[page_no] = result
             self.task_service.create_event(task_id, api_key, "page_completed", "page_generation", f"第 {page_no} 页结构化生成完成", page_no=page_no)
             with lock:
-                self._update_progress(task_id, counters, total_pages=1)
+                self._update_progress(task_id, counters, total_pages)
         except Exception as exc:
             with lock:
                 counters["processed"] += 1
@@ -667,12 +675,12 @@ class OrchestrationService:
             )
             self.task_service.create_event(task_id, api_key, "page_failed", "page_generation", f"第 {page_no} 页结构化生成失败: {exc}", page_no=page_no)
             with lock:
-                self._update_progress(task_id, counters, total_pages=1)
+                self._update_progress(task_id, counters, total_pages)
 
     def _update_progress(self, task_id: str, counters: dict, total_pages: int) -> None:
         """更新任务进度（调用方需持有 lock）。"""
         processed = counters["processed"]
-        progress = 10 + (processed / max(total_pages, 1)) * 80
+        progress = min(10 + (processed / max(total_pages, 1)) * 80, 90)
         self.task_service.repository.update_task(
             task_id,
             {

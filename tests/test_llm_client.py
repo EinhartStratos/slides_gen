@@ -263,4 +263,4 @@ class TestCallLlmParams:
             client._call_llm("key", "sys", "user", stream=True)
 
         assert captured_payload["model"] == "test-model"
-        assert captured_payload["enable_thinking"] is False
+        assert "enable_thinking" not in captured_payload

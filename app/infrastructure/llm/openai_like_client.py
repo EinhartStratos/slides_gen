@@ -55,12 +55,13 @@ class OpenAILikePageGenerationClient(BasePageGenerationClient):
             "model": model or self.settings.llm_model,
             "temperature": 0.2,
             "stream": stream,
-            "enable_thinking": enable_thinking,
             "messages": [
                 {"role": "system", "content": system_prompt},
                 {"role": "user", "content": user_prompt},
             ],
         }
+        if enable_thinking:
+            payload["enable_thinking"] = True
         if use_json:
             payload["response_format"] = {"type": "json_object"}
 
@@ -92,6 +93,11 @@ class OpenAILikePageGenerationClient(BasePageGenerationClient):
                         )
                         time_module.sleep(delay)
                         continue
+                    logger.error(
+                        "LLM 请求返回 HTTP %s (attempt=%s/%s)，URL=%s，响应体=%s",
+                        status_code, attempt, max_retries, exc.request.url,
+                        getattr(exc.response, "_text", repr(exc)),
+                    )
                     raise
                 except (httpx2.ConnectError, httpx2.ReadTimeout, httpx2.WriteTimeout) as exc:
                     delay = min(base_delay * (2 ** (attempt - 1)) + random.uniform(0, 1), max_delay)
@@ -134,7 +140,14 @@ class OpenAILikePageGenerationClient(BasePageGenerationClient):
                 json=payload,
                 headers=headers,
             ) as response:
-                response.raise_for_status()
+                if response.status_code >= 400:
+                    body = response.read()
+                    body_text = body.decode("utf-8", errors="replace")
+                    logger.error(
+                        "LLM 流式请求返回 HTTP %s，URL=%s，响应体=%s",
+                        response.status_code, self._api_url, body_text,
+                    )
+                    response.raise_for_status()
                 for line in response.iter_lines():
                     if not line:
                         continue
@@ -196,7 +209,7 @@ class OpenAILikePageGenerationClient(BasePageGenerationClient):
                     logger.info("第 %s 页跳过，原因: %s", page_no, plan.skip_reason)
                 return plan
             except Exception as exc:
-                logger.warning("LLM 页面规划失败 (page=%s, attempt=%s/%s): %s", page_no, attempt, max_retries, exc)
+                logger.warning("LLM 页面规划失败 (page=%s, attempt=%s/%s): %s: %s", page_no, attempt, max_retries, type(exc).__name__, exc)
                 if attempt < max_retries:
                     time_module.sleep(2 * attempt)
         logger.warning("LLM 页面规划重试 %s 次仍失败 (page=%s)，回退启发式逻辑", max_retries, page_no)
