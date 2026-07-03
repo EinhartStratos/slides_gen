@@ -16,7 +16,7 @@ from app.services.hybrid_pptx_exporter import HybridPptxExporter
 from app.schemas.structured_generation import StructuredPageResult, GeneratedElement
 
 # 任务目录
-TASK_DIR = Path("mock_ftp/slides_gen_server/tasks/task_20260703152925_896d63bf")
+TASK_DIR = Path("mock_ftp/slides_gen_server/tasks/task_20260703160147_7358a679")
 # 模板目录
 TEMPLATE_DIR = Path("mock_ftp/slides_gen_server/templates/tpl_20260627132835_bce99ff8")
 TEMPLATE_PPTX = TEMPLATE_DIR / "source" / "template.pptx"

@@ -183,7 +183,7 @@ class OrchestrationService:
 
             with lock:
                 completed_pages = counters["completed"]
-                skipped_pages = counters["skipped"]
+                skipped_count = counters["skipped"]
                 failed_pages = counters["failed"]
                 processed_pages = counters["processed"]
 
@@ -191,7 +191,7 @@ class OrchestrationService:
                 "task_id": task_id,
                 "total_pages": total_pages,
                 "completed_pages": completed_pages,
-                "skipped_pages": skipped_pages,
+                "skipped_pages": skipped_count,
                 "failed_pages": failed_pages,
             }
             validation_report_path = task_workspace.validation_dir / "validation_report.json"
@@ -264,7 +264,7 @@ class OrchestrationService:
                     "ftp_result_pptx_path": ftp_result_pptx_path,
                     "processed_pages": processed_pages,
                     "completed_pages": completed_pages,
-                    "skipped_pages": skipped_pages,
+                    "skipped_pages": skipped_count,
                     "failed_pages": failed_pages,
                     "completed_at": datetime.now(),
                     "error_message": None,

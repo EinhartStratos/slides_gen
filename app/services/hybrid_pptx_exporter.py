@@ -154,7 +154,11 @@ class HybridPptxExporter:
 
         # 解析转换后的 XML
         new_slide_root = etree.fromstring(slide_xml.encode("utf-8"))
-        new_sp_tree = new_slide_root.find(_qn("p:spTree"))
+        new_cSld = new_slide_root.find(_qn("p:cSld"))
+        if new_cSld is None:
+            logger.warning("SVG 转换结果中未找到 cSld (slide=%s)", slide_index)
+            return
+        new_sp_tree = new_cSld.find(_qn("p:spTree"))
         if new_sp_tree is None:
             logger.warning("SVG 转换结果中未找到 spTree (slide=%s)", slide_index)
             return
