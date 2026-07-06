@@ -183,6 +183,8 @@ class OpenAILikePageGenerationClient(BasePageGenerationClient):
         total_pages: int = 0,
         model: str | None = None,
         enable_thinking: bool = False,
+        check_rules_text: str = "",
+        custom_requirements: str = "",
     ) -> PagePlanResult:
         if not self.enabled or not api_key.strip():
             return self._plan_fallback_single(page_no, page_name, total_pages)
@@ -191,12 +193,16 @@ class OpenAILikePageGenerationClient(BasePageGenerationClient):
             try:
                 content = self._call_llm(
                     api_key=api_key,
-                    system_prompt=self.prompt_builder.build_plan_system_prompt(),
+                    system_prompt=self.prompt_builder.build_plan_system_prompt(
+                        check_rules_text=check_rules_text,
+                        custom_requirements=custom_requirements,
+                    ),
                     user_prompt=self.prompt_builder.build_plan_user_prompt(
                         requirement_text=requirement_text,
                         page_no=page_no,
                         page_name=page_name,
                         svg_content=svg_content,
+                        custom_requirements=custom_requirements,
                     ),
                     use_json=True,
                     stream=True,
@@ -226,6 +232,8 @@ class OpenAILikePageGenerationClient(BasePageGenerationClient):
         svg_content: str,
         model: str | None = None,
         enable_thinking: bool = False,
+        check_rules_text: str = "",
+        custom_requirements: str = "",
     ) -> PageGenerationResult:
         if not self.enabled or not api_key.strip():
             return self._generate_fallback(page_no, page_name)
@@ -234,7 +242,11 @@ class OpenAILikePageGenerationClient(BasePageGenerationClient):
             try:
                 content = self._call_llm(
                     api_key=api_key,
-                    system_prompt=self.prompt_builder.build_generate_system_prompt(page_type),
+                    system_prompt=self.prompt_builder.build_generate_system_prompt(
+                        page_type,
+                        check_rules_text=check_rules_text,
+                        custom_requirements=custom_requirements,
+                    ),
                     user_prompt=self.prompt_builder.build_generate_user_prompt(
                         requirement_text=requirement_text,
                         page_no=page_no,
@@ -242,6 +254,7 @@ class OpenAILikePageGenerationClient(BasePageGenerationClient):
                         page_type=page_type,
                         page_title=page_title,
                         svg_content=svg_content,
+                        custom_requirements=custom_requirements,
                     ),
                     model=model,
                     enable_thinking=enable_thinking,
@@ -276,6 +289,8 @@ class OpenAILikePageGenerationClient(BasePageGenerationClient):
         page_rule: dict,
         model: str | None = None,
         enable_thinking: bool = False,
+        check_rules_text: str = "",
+        custom_requirements: str = "",
     ) -> StructuredPageResult:
         """结构化内容生成：LLM 输出 JSON（文本/表格），不输出 SVG。"""
         if not self.enabled or not api_key.strip():
@@ -290,8 +305,15 @@ class OpenAILikePageGenerationClient(BasePageGenerationClient):
             try:
                 content = self._call_llm(
                     api_key=api_key,
-                    system_prompt=build_structured_system_prompt(),
-                    user_prompt=build_structured_user_prompt(requirement_text, page_rule),
+                    system_prompt=build_structured_system_prompt(
+                        check_rules_text=check_rules_text,
+                        custom_requirements=custom_requirements,
+                    ),
+                    user_prompt=build_structured_user_prompt(
+                        requirement_text,
+                        page_rule,
+                        custom_requirements=custom_requirements,
+                    ),
                     use_json=True,
                     stream=True,
                     model=model,

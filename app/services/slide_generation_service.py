@@ -64,6 +64,8 @@ class SlideGenerationService:
         total_pages: int = 0,
         model: str | None = None,
         enable_thinking: bool = False,
+        check_rules_text: str = "",
+        custom_requirements: str = "",
     ) -> dict:
         """对单页进行规划，返回 plan dict。"""
         if self.generation_client is not None:
@@ -76,6 +78,8 @@ class SlideGenerationService:
                 total_pages=total_pages,
                 model=model,
                 enable_thinking=enable_thinking,
+                check_rules_text=check_rules_text,
+                custom_requirements=custom_requirements,
             )
             return plan.model_dump(mode="json")
         if page_no == 1:
@@ -108,6 +112,8 @@ class SlideGenerationService:
         page_plan: dict,
         model: str | None = None,
         enable_thinking: bool = False,
+        check_rules_text: str = "",
+        custom_requirements: str = "",
     ) -> dict:
         svg_content = source_svg_path.read_text(encoding="utf-8", errors="ignore")
         if self.generation_client is not None:
@@ -121,6 +127,8 @@ class SlideGenerationService:
                 svg_content=svg_content,
                 model=model,
                 enable_thinking=enable_thinking,
+                check_rules_text=check_rules_text,
+                custom_requirements=custom_requirements,
             )
             return result.model_dump(mode="json")
         return {

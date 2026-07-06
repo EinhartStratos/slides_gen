@@ -6,6 +6,7 @@ from app.core.config import Settings
 from app.infrastructure.llm.concurrency import init_global_semaphore
 from app.infrastructure.llm.openai_like_client import OpenAILikePageGenerationClient
 from app.infrastructure.llm.prompt_builder import PageAnalysisPromptBuilder
+from app.infrastructure.llm.rule_matcher import RuleMatcher
 from app.services.builtin_template_service import BuiltinTemplateService
 from app.services.container import ServiceContainer
 from app.services.orchestration_service import OrchestrationService
@@ -69,6 +70,7 @@ def build_services(settings: Settings) -> AppServices:
     pptx_export_service = PptxExportService(container.svg_to_pptx)
     pptx_builder_service = PptxBuilderService(generation_client=generation_client)
     hybrid_exporter = HybridPptxExporter(settings=settings)
+    rule_matcher = RuleMatcher.from_file("app/config/check_rules.json")
     orchestration_service = OrchestrationService(
         workspace=container.workspace,
         ftp=container.ftp,
@@ -79,6 +81,7 @@ def build_services(settings: Settings) -> AppServices:
         pptx_export_service=pptx_export_service,
         pptx_builder_service=pptx_builder_service,
         hybrid_exporter=hybrid_exporter,
+        rule_matcher=rule_matcher,
         settings=settings,
     )
     return AppServices(

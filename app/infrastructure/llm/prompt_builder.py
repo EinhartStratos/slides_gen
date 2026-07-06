@@ -2,8 +2,8 @@ from __future__ import annotations
 
 
 class PageAnalysisPromptBuilder:
-    def build_plan_system_prompt(self) -> str:
-        return (
+    def build_plan_system_prompt(self, check_rules_text: str = "", custom_requirements: str = "") -> str:
+        prompt = (
             "你是 PPT 页面规划助手。你的任务是根据需求文本和单页模板 SVG 内容，"
             "判断该页是否需要生成内容，并给出页面类型和标题。\n\n"
             "输出要求：\n"
@@ -31,6 +31,17 @@ class PageAnalysisPromptBuilder:
             "   - 包含目录结构的页面为 toc\n"
             "5. 只返回 JSON 对象，不要任何其他文字。"
         )
+        if check_rules_text:
+            prompt += (
+                "\n\n以下是该页面需要遵守的检查规则，规划时请考虑这些规则的要求：\n"
+                f"{check_rules_text}"
+            )
+        if custom_requirements and custom_requirements.strip():
+            prompt += (
+                "\n\n以下是用户额外提出的自定义要求，规划时必须遵循：\n"
+                f"{custom_requirements.strip()}"
+            )
+        return prompt
 
     def build_plan_user_prompt(
         self,
@@ -38,15 +49,19 @@ class PageAnalysisPromptBuilder:
         page_no: int,
         page_name: str,
         svg_content: str,
+        custom_requirements: str = "",
     ) -> str:
-        return (
-            f"需求文本：\n{requirement_text.strip()}\n\n"
-            f"当前是第 {page_no} 页，页面名称：{page_name}\n\n"
-            f"该页模板 SVG 内容：\n{svg_content.strip()}\n\n"
-            "请根据需求文本和该页模板内容，判断这一页是否需要生成内容，并给出页面类型和标题。只返回 JSON 对象。"
-        )
+        parts = [
+            f"需求文本：\n{requirement_text.strip()}\n\n",
+            f"当前是第 {page_no} 页，页面名称：{page_name}\n\n",
+            f"该页模板 SVG 内容：\n{svg_content.strip()}\n\n",
+        ]
+        if custom_requirements and custom_requirements.strip():
+            parts.append(f"用户自定义要求：\n{custom_requirements.strip()}\n\n")
+        parts.append("请根据需求文本和该页模板内容，判断这一页是否需要生成内容，并给出页面类型和标题。只返回 JSON 对象。")
+        return "".join(parts)
 
-    def build_generate_system_prompt(self, page_type: str) -> str:
+    def build_generate_system_prompt(self, page_type: str, check_rules_text: str = "", custom_requirements: str = "") -> str:
         common = (
             "你是一个 PPT 页面 SVG 生成助手。你的任务是：根据需求文本和模板页的版面结构，"
             "生成一个全新的完整 SVG 文件。\n\n"
@@ -68,6 +83,17 @@ class PageAnalysisPromptBuilder:
             "   - 只有当内容确实需要区分标题和正文时，才使用不同的 <g> 组；"
             "如果全都是正文，则合并到一个文本框中\n"
         )
+
+        if check_rules_text:
+            common += (
+                "\n\n以下是该页面需要遵守的检查规则，生成内容时必须严格遵循：\n"
+                f"{check_rules_text}"
+            )
+        if custom_requirements and custom_requirements.strip():
+            common += (
+                "\n\n以下是用户额外提出的自定义要求，生成内容时必须遵循：\n"
+                f"{custom_requirements.strip()}"
+            )
 
         if page_type == "cover":
             return common + (
@@ -118,12 +144,16 @@ class PageAnalysisPromptBuilder:
         page_type: str,
         page_title: str,
         svg_content: str,
+        custom_requirements: str = "",
     ) -> str:
-        return (
-            f"需求文本：\n{requirement_text.strip()}\n\n"
-            f"当前是第 {page_no} 页，页面名称：{page_name}\n"
-            f"页面类型：{page_type}\n"
-            f"页面标题：{page_title}\n\n"
-            f"模板页 SVG 内容（参考其版面结构和样式，但不要保留占位文字）：\n{svg_content.strip()}\n\n"
-            "请根据需求文本的内容，参考模板的版面结构，生成一个全新的完整 SVG。"
-        )
+        parts = [
+            f"需求文本：\n{requirement_text.strip()}\n\n",
+            f"当前是第 {page_no} 页，页面名称：{page_name}\n",
+            f"页面类型：{page_type}\n",
+            f"页面标题：{page_title}\n\n",
+            f"模板页 SVG 内容（参考其版面结构和样式，但不要保留占位文字）：\n{svg_content.strip()}\n\n",
+        ]
+        if custom_requirements and custom_requirements.strip():
+            parts.append(f"用户自定义要求：\n{custom_requirements.strip()}\n\n")
+        parts.append("请根据需求文本的内容，参考模板的版面结构，生成一个全新的完整 SVG。")
+        return "".join(parts)

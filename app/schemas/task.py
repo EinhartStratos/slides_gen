@@ -19,6 +19,7 @@ class CreateGenerationTaskRequest(SchemaModel):
     task_id: Optional[str] = Field(default=None, description="任务ID；为空时由服务端生成")
     requirement_text: str = Field(..., description="本次 PPT 生成需求全文")
     template_id: Optional[str] = Field(default=None, description="模板ID；为空时使用系统默认模板")
+    custom_requirements: Optional[str] = Field(default=None, description="用户自定义的额外要求，将注入到每页的规划和生成提示词中")
     options: Optional[GenerationOptionsSchema] = Field(default=None, description="任务执行参数")
 
 

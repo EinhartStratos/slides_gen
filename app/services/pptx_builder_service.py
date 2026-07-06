@@ -60,6 +60,8 @@ class PptxBuilderService:
         page_rule: dict,
         model: str | None = None,
         enable_thinking: bool = False,
+        check_rules_text: str = "",
+        custom_requirements: str = "",
     ) -> StructuredPageResult:
         """调用 LLM 生成单页结构化内容。
 
@@ -71,6 +73,8 @@ class PptxBuilderService:
             page_rule: 该页的模板规则 dict
             model: 可选模型名称
             enable_thinking: 是否启用思考模式
+            check_rules_text: 该页面匹配到的检查规则文本
+            custom_requirements: 用户自定义的额外要求
         Returns:
             StructuredPageResult
         """
@@ -89,6 +93,8 @@ class PptxBuilderService:
             page_rule=page_rule,
             model=model,
             enable_thinking=enable_thinking,
+            check_rules_text=check_rules_text,
+            custom_requirements=custom_requirements,
         )
 
     def save_page_result(

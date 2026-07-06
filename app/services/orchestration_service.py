@@ -28,6 +28,7 @@ from app.core.constants import (
 )
 from app.core.utils import json_dumps
 from app.core.config import Settings
+from app.infrastructure.llm.rule_matcher import RuleMatcher
 from app.infrastructure.ppt_master.project_workspace import ProjectWorkspace
 from app.infrastructure.storage.ftp import FtpStorage
 from app.services.hybrid_pptx_exporter import HybridPptxExporter
@@ -55,6 +56,7 @@ class OrchestrationService:
         pptx_export_service: PptxExportService,
         pptx_builder_service: PptxBuilderService | None = None,
         hybrid_exporter: HybridPptxExporter | None = None,
+        rule_matcher: RuleMatcher | None = None,
         settings: Settings | None = None,
     ) -> None:
         self.workspace = workspace
@@ -66,6 +68,7 @@ class OrchestrationService:
         self.pptx_export_service = pptx_export_service
         self.pptx_builder_service = pptx_builder_service
         self.hybrid_exporter = hybrid_exporter
+        self.rule_matcher = rule_matcher
         self.settings = settings
 
     async def run_task(self, api_key: str, task_id: str) -> None:
@@ -97,6 +100,7 @@ class OrchestrationService:
             options = request_payload.get("options") or {}
             llm_model = options.get("model")
             llm_enable_thinking = options.get("enable_thinking", False)
+            custom_requirements = request_payload.get("custom_requirements") or ""
 
             existing_pages = {row["page_no"]: row for row in self.task_service.repository.list_pages(task_id)}
             total_pages = len(source_svgs)
@@ -155,6 +159,7 @@ class OrchestrationService:
                         svg_pages=svg_pages,
                         structured_pages=structured_pages,
                         skipped_pages=skipped_pages,
+                        custom_requirements=custom_requirements,
                     )
                     futures[index] = future
 
@@ -313,6 +318,7 @@ class OrchestrationService:
         svg_pages: dict | None = None,
         structured_pages: dict | None = None,
         skipped_pages: set | None = None,
+        custom_requirements: str = "",
     ) -> None:
         """单页完整处理：规划 → 生成（SVG 或结构化）→ 渲染 → 校验 → 上传。线程安全。"""
 
@@ -350,6 +356,24 @@ class OrchestrationService:
         self.task_service.create_event(task_id, api_key, "page_started", "page_generation", f"开始处理第 {page_no} 页", page_no=page_no)
 
         svg_content = source_svg.read_text(encoding="utf-8", errors="ignore")
+
+        # 匹配该页面的检查规则
+        check_rules_text = ""
+        if self.rule_matcher is not None and page_rule is not None:
+            page_purpose = page_rule.get("page_purpose", "text")
+            element_text = " ".join(
+                (e.get("content_requirement") or "") + " " + (e.get("default_text") or "")
+                for e in page_rule.get("elements", [])
+            )
+            matched_rules = self.rule_matcher.match(
+                page_name=page_rule.get("page_name", page_name),
+                page_purpose=page_purpose,
+                element_text=element_text,
+            )
+            check_rules_text = self.rule_matcher.format_rules_for_prompt(matched_rules)
+            if matched_rules:
+                logger.info("第 %s 页匹配到 %d 条检查规则", page_no, len(matched_rules))
+
         page_plan = self.slide_service.plan_single_page(
             api_key=api_key,
             requirement_text=requirement_text,
@@ -359,6 +383,8 @@ class OrchestrationService:
             total_pages=total_pages,
             model=llm_model,
             enable_thinking=llm_enable_thinking,
+            check_rules_text=check_rules_text,
+            custom_requirements=custom_requirements,
         )
         with lock:
             all_plans[page_no] = page_plan
@@ -427,6 +453,8 @@ class OrchestrationService:
                 total_pages=total_pages,
                 structured_pages=structured_pages,
                 skipped_pages=skipped_pages,
+                check_rules_text=check_rules_text,
+                custom_requirements=custom_requirements,
             )
             return
 
@@ -434,6 +462,8 @@ class OrchestrationService:
             page_result = self.slide_service.generate_page_svg(
                 api_key, requirement_text, page_no, source_svg, page_plan,
                 model=llm_model, enable_thinking=llm_enable_thinking,
+                check_rules_text=check_rules_text,
+                custom_requirements=custom_requirements,
             )
 
             if page_result.get("decision_source") == "failed":
@@ -584,6 +614,8 @@ class OrchestrationService:
         total_pages: int = 1,
         structured_pages: dict | None = None,
         skipped_pages: set | None = None,
+        check_rules_text: str = "",
+        custom_requirements: str = "",
     ) -> None:
         """结构化填充路径：LLM 输出 JSON → 保存结果 → 记录到 structured_pages。"""
         try:
@@ -595,6 +627,8 @@ class OrchestrationService:
                 page_rule=page_rule,
                 model=llm_model,
                 enable_thinking=llm_enable_thinking,
+                check_rules_text=check_rules_text,
+                custom_requirements=custom_requirements,
             )
 
             if not result.should_generate:
