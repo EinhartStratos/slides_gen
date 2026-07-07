@@ -5,25 +5,37 @@
 ```text
 app/
 ├─ api/v1/endpoints/        接口层（health, tasks, templates）
+├─ config/                  配置文件
+│  └─ check_rules.json      内容检查规则（66 条，用于规则注入）
 ├─ core/                    配置(config.py)、常量(constants.py)、异常(exceptions.py)
-├─ schemas/                 Pydantic 数据模型（task.py, template.py, common.py）
+├─ schemas/                 Pydantic 数据模型
+│  ├─ task.py               任务请求/响应模型（含 custom_requirements）
+│  ├─ template.py           模板模型
+│  ├─ common.py             通用响应模型
+│  └─ structured_generation.py  结构化生成结果模型
 ├─ services/                业务编排层
-│  ├─ orchestration_service.py    任务全生命周期编排
-│  ├─ slide_generation_service.py  逐页规划与生成
+│  ├─ orchestration_service.py    任务全生命周期编排（含规则匹配与注入）
+│  ├─ slide_generation_service.py  逐页规划与 SVG 生成
+│  ├─ pptx_builder_service.py      结构化内容生成（LLM → JSON → 回填模板）
+│  ├─ hybrid_pptx_exporter.py      混合导出（结构化 + SVG → PPTX）
 │  ├─ task_service.py             任务 CRUD 和状态管理
 │  ├─ template_service.py         模板查询与复制
 │  ├─ template_import_service.py  模板导入（PPTX→SVG）
+│  ├─ builtin_template_service.py 公共模板管理
 │  ├─ svg_validation_service.py   SVG 校验
 │  ├─ pptx_export_service.py      SVG→PPTX 导出
-│  └─ bootstrap.py                服务依赖组装
+│  └─ bootstrap.py                服务依赖组装（含 RuleMatcher 注入）
 ├─ infrastructure/
 │  ├─ db/                   MySQL 数据库适配
+│  │  └─ task_repository.py 任务/页面/事件/产物 CRUD
 │  ├─ storage/ftp.py        FTP/mock_ftp 存储适配
 │  ├─ llm/                  LLM 客户端
 │  │  ├─ base.py            抽象接口 + Pydantic 模型
 │  │  ├─ openai_like_client.py  OpenAI 风格 API 客户端（httpx2）
 │  │  ├─ concurrency.py     全局信号量管理
-│  │  └─ prompt_builder.py  规划和生成 prompt 构建器
+│  │  ├─ prompt_builder.py  规划和 SVG 生成 prompt 构建器
+│  │  ├─ structured_prompt_builder.py  结构化内容生成 prompt 构建器
+│  │  └─ rule_matcher.py    检查规则匹配器（按页面匹配 check_rules.json）
 │  └─ ppt_master/           PPTX↔SVG 转换引擎
 │     ├─ project_workspace.py
 │     ├─ pptx_to_svg_adapter.py
@@ -38,39 +50,59 @@ app/
 
 ## 2. 核心生成链路
 
-### 2.1 两阶段逐页生成
+### 2.1 混合生成：SVG + 结构化填充
+
+系统支持两种生成方式，按页面类型自动分流：
+
+- **SVG 生成**（`diagram` 类型页面）：LLM 生成完整 SVG → 转为可编辑 DrawingML 形状
+  - 适用于架构图、流程图、时序图等复杂图形页
+  - 由 `slide_generation_service.py` + `prompt_builder.py` 驱动
+- **结构化填充**（`cover/toc/content/end` 类型页面）：LLM 输出结构化 JSON → 回填模板原生文本框和表格
+  - 速度快、编辑性好、支持自动拆页
+  - 由 `pptx_builder_service.py` + `structured_prompt_builder.py` 驱动
+
+页面类型分流由环境变量 `SVG_PAGE_TYPES` 控制（默认 `diagram`）。
+
+### 2.2 两阶段逐页生成
 
 每个页面独立走两个阶段：
 
 **阶段一：规划（plan_single_page）**
-- 输入：完整需求文本 + 当前页模板 SVG
+- 输入：需求文本 + 当前页模板 SVG + 匹配的检查规则 + 自定义要求
 - LLM 返回 JSON：`should_generate`、`skip_reason`、`page_type`、`page_title`
 - 规则：封面/尾页/目录页始终 `should_generate=true`
 - 失败处理：重试 3 次，仍失败则回退启发式逻辑
 
-**阶段二：生成（generate_page_svg）**
-- 输入：完整需求文本 + 当前页模板 SVG + 规划结果
-- LLM 直接输出完整 SVG 代码（非 JSON）
+**阶段二：生成**
+- SVG 路径：`generate_page_svg` → LLM 直接输出完整 SVG 代码
+- 结构化路径：`generate_page_content` → LLM 输出结构化 JSON（文本/表格）
 - 失败处理：重试 3 次，仍失败则标记 `decision_source=failed`，该页不输出到最终 PPTX
 
-### 2.2 任务编排流程
+### 2.3 任务编排流程
 
 ```
 run_task()
 ├─ 加载模板，复制 SVG 到任务工作区
-├─ 解析 request_payload_json 获取 options.model / options.enable_thinking
+├─ 解析 request_payload_json 获取 options.model / options.enable_thinking / custom_requirements
+├─ 解析模板规则（template_rules.json）
 ├─ ThreadPoolExecutor 并发提交所有页面
 │  └─ _process_one_page(page_no)
+│     ├─ RuleMatcher 匹配该页检查规则
 │     ├─ 规划（plan_single_page）→ LLM 返回 JSON
 │     ├─ should_generate=false → 跳过，记录 skip_reason
-│     ├─ 生成（generate_page_svg）→ LLM 返回 SVG
-│     ├─ decision_source=failed → 跳过，记录错误
-│     └─ 正常生成 → 写入 svg_output / svg_final
+│     ├─ 按 page_type 分流：
+│     │  ├─ SVG 路径 → generate_page_svg → LLM 返回 SVG
+│     │  └─ 结构化路径 → _process_structured_page → generate_page_content → LLM 返回 JSON
+│     └─ 正常生成 → 写入 svg_output / svg_final / structured_results
 ├─ 全局信号量控制 LLM 请求总并发（MAX_LLM_CONCURRENCY）
 ├─ 429 限流退避：Retry-After 优先，无则指数退避+抖动
 ├─ 网络错误退避重试
 ├─ 线程锁保护进度计数器
-├─ 导出 PPTX
+├─ 混合导出 PPTX
+│  ├─ 结构化页面 → PPTBuilder 回填原生文本框/表格
+│  ├─ SVG 页面 → convert_svg_to_slide_shapes 注入 DrawingML 可编辑形状
+│  ├─ 删除跳过的页面 → 重排 slide 顺序
+│  └─ 保存最终 PPTX
 ├─ 上传产物到 FTP
 └─ finally: 清理 runtime 任务目录
 ```
@@ -81,11 +113,11 @@ run_task()
 
 - 接口 `options.model` 和 `options.enable_thinking` 可动态指定
 - 不传时使用 env 默认值（`LLM_MODEL` / `enable_thinking=false`）
-- 参数从 `request_payload_json` 中解析，经 `orchestration_service` → `slide_generation_service` → `openai_like_client` 透传
+- 参数从 `request_payload_json` 中解析，经 `orchestration_service` → `slide_generation_service` / `pptx_builder_service` → `openai_like_client` 透传
 
 ### 3.2 重试机制
 
-- `plan_single_page` 和 `generate_page_svg` 均有 3 次外层重试
+- `plan_single_page`、`generate_page_svg`、`generate_page_content` 均有 3 次外层重试
 - `_call_llm` 内层有独立的限流退避重试（`LLM_RATE_LIMIT_MAX_RETRIES`）
 - 429 限流：优先读 `Retry-After` 头，无则指数退避 + 随机抖动
 - 网络错误（ConnectError / ReadTimeout / WriteTimeout）：指数退避重试
@@ -106,42 +138,71 @@ run_task()
 - `_call_llm` 中 acquire/release，异常时也保证释放
 - 信号量在重试期间持续持有，避免重试时并发数超限
 
-## 4. 存储策略
+## 4. 检查规则注入
 
-### 4.1 FTP 存储
+### 4.1 规则文件
+
+`app/config/check_rules.json` 包含 66 条检查规则，涵盖文档标准化、架构设计、技术架构、数据架构、安全架构、非功能设计、工作量及实施计划等方面。每条规则包含 `id`、`category`、`check_point`、`requirement`、`keywords`、`page_purposes` 字段。
+
+### 4.2 RuleMatcher
+
+`app/infrastructure/llm/rule_matcher.py` 在每页处理时根据页面信息匹配适用规则：
+
+- **专有关键词**匹配页名和元素内容
+- **大类关键词**仅匹配页名（作为 fallback，避免遗漏）
+- 匹配结果格式化为文本，注入到规划阶段和生成阶段的 system prompt 中
+
+### 4.3 自定义要求（custom_requirements）
+
+创建任务时可通过 `custom_requirements` 字段传入用户自定义的额外要求。该字段随 `request_payload_json` 持久化到数据库，运行时注入到每页的规划和生成提示词中（system prompt 和 user prompt）。
+
+## 5. 存储策略
+
+### 5.1 FTP 存储
 
 - `FTP_HOST` 留空时：仅使用本地 `mock_ftp/`
 - `FTP_HOST` 配置时：远程 FTP + 本地 mock_ftp 双写
 - `MOCK_FTP_ENABLED=false`：关闭 mock_ftp 写入，仅用远程 FTP
 
-### 4.2 Runtime 清理
+### 5.2 Runtime 清理
 
 - `runtime/tasks/{task_id}/` 在任务完成或失败后自动清理（`shutil.rmtree`）
 - 所有产物已上传 FTP，runtime 仅作为运行时工作区
 
-## 5. 模板策略
+## 6. 模板策略
 
 - 公共模板：`is_builtin=1`，所有调用方可使用
 - 私有模板：带 `api_key` 归属，仅限所属调用方
 - 默认模板：项目根目录 `templete.pptx`，启动时自动导入
 - 模板主表示为 SVG 工作区（`svg/` + `svg-flat/`）
+- 模板规则文件 `template_rules.json` 定义每页的元素结构和填充策略
 
-## 6. Prompt 设计要点
+## 7. Prompt 设计要点
 
-### 6.1 规划 Prompt
+### 7.1 规划 Prompt（prompt_builder.py）
 
 - 明确要求封面/尾页/目录页 `should_generate=true`
 - 要求输出纯 JSON（无 markdown 代码块）
 - 判断依据：模板 SVG 文字内容 + 需求文本匹配度
+- 支持注入检查规则和自定义要求
 
-### 6.2 生成 Prompt
+### 7.2 SVG 生成 Prompt（prompt_builder.py）
 
 - 直接输出完整 SVG，不输出 JSON 或解释
 - 排版规则：参考模板 y 坐标、行间距 24-28px、内容不超 viewBox
-- **文本框规则**：同一内容区域的多行文字用一个 `<text>` + 多个 `<tspan>` 实现，不要每行单独创建小文本框
-- 只有需要区分标题和正文时才使用不同 `<g>` 组
+- **文本框规则**：同一内容区域的多行文字用一个 `<text>` + 多个 `<tspan>` 实现
+- 按 page_type 添加特殊要求（cover/toc/diagram/end/content）
+- 支持注入检查规则和自定义要求
 
-## 7. 图标资源
+### 7.3 结构化生成 Prompt（structured_prompt_builder.py）
+
+- 严格输出 JSON，包含 `should_generate`、`skip_reason`、`elements`
+- 只允许输出 text 和 table 两类元素
+- 模板说明文字不可直接照抄，需改写为真实业务内容
+- 支持内容溢出自动拆页
+- 支持注入检查规则和自定义要求
+
+## 8. 图标资源
 
 `app/vendor/ppt_master/templates/icons/` 下的 SVG 图标被以下脚本使用：
 
@@ -150,9 +211,22 @@ run_task()
 
 **不能移除该目录。**
 
-## 8. 相关文档
+## 9. 辅助脚本
 
-- `docs/fastapi_service_architecture.md`：架构设计
-- `docs/mysql_ftp_persistence_design_v2.md`：持久化设计
-- `docs/concurrency_design.md`：LLM 并发控制设计
+`scripts/` 目录下包含规则相关的辅助脚本：
+
+- `convert_check_rules.py`：将 `check_rules.txt` 转换为 `check_rules.json`
+- `verify_rule_coverage.py`：验证规则匹配覆盖率
+- `coverage_summary.py`：输出规则覆盖统计摘要
+- `check_json_quality.py`：检查 `check_rules.json` 数据质量
+
+## 10. 相关文档
+
+- [API 接口文档](api_reference.md)
+- [架构设计](fastapi_service_architecture.md)
+- [持久化设计](mysql_ftp_persistence_design_v2.md)
+- [并发设计](concurrency_design.md)
+- [混合生成设计](hybrid_generation_design.md)
+- [检查规则注入方案](check_rules_injection_design.md)
+- [问题修复记录](bugfix_log.md)
 - `sql/mysql_init_v2.sql`：建表脚本

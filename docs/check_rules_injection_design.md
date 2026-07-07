@@ -291,3 +291,18 @@ else:
 5. 修改 orchestration_service 和 bootstrap，初始化 RuleMatcher
 6. 修改 openai_like_client，在调用时传入匹配的规则
 7. 全量测试，确认生成内容符合规范
+
+## 九、实现状态
+
+> **已实现**（2026-07）
+
+以上所有步骤均已完成：
+
+- ✅ `check_rules.json` 已生成，包含 66 条规则
+- ✅ `RuleMatcher` 类已实现，支持专有关键词 + 大类关键词匹配
+- ✅ `prompt_builder.py` 和 `structured_prompt_builder.py` 已支持注入 `check_rules_text` 和 `custom_requirements`
+- ✅ `openai_like_client.py` 的 `plan_single_page`、`generate_page_svg`、`generate_page_content` 均已支持传递规则和自定义要求
+- ✅ `orchestration_service.py` 在每页处理前匹配规则并传递
+- ✅ `bootstrap.py` 已注入 `RuleMatcher`
+- ✅ `CreateGenerationTaskRequest` 已增加 `custom_requirements` 字段
+- ✅ 辅助脚本 `verify_rule_coverage.py`、`coverage_summary.py`、`check_json_quality.py` 已创建

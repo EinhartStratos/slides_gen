@@ -12,7 +12,7 @@
 你可以：
 
 - 导入公共基础模板或私有模板
-- 提交生成任务（支持自定义 LLM 模型和思考模式开关）
+- 提交生成任务（支持自定义 LLM 模型、思考模式开关、自定义要求）
 - 查询任务进度和分页状态
 - 下载最终 PPTX
 
@@ -21,7 +21,6 @@
 - `templete.pptx`：默认基础模板文件
 - `mock_ftp/`：本地模拟 FTP 目录（可通过 `MOCK_FTP_ENABLED` 关闭）
 - `runtime/`：服务运行时工作区（任务完成后自动清理）
-- `app/vendor/ppt_master/`：内置的 PPTX↔SVG 转换引擎及图标资源
 - `docs/`：开发文档
 
 ## 环境要求
@@ -68,37 +67,9 @@ uv run python -m uvicorn app.main:app --reload
 
 默认访问：`http://127.0.0.1:8000`
 
-## 核心生成流程
-
-```
-1. 创建任务 → 持久化到 MySQL
-2. 加载模板 → 复制模板 SVG 到任务工作区 → 解析模板规则（TemplateRuleParser）
-3. 并发逐页处理（ThreadPoolExecutor + 全局信号量控制）
-   ├─ 规划（LLM）→ 判断 should_generate / page_type / page_title
-   │  - 封面、尾页、目录页始终生成
-   │  - 无关页面跳过并记录 skip_reason
-   │  - LLM 失败自动重试 3 次
-   ├─ 按页面类型分流生成
-   │  ├─ SVG 路径（diagram 类型）
-   │  │  - LLM 生成 SVG → 校验 → 保存到 svg_final/
-   │  │  - 转为可编辑 DrawingML 形状（不渲染 PNG）
-   │  └─ 结构化路径（cover/toc/content/end 类型）
-   │     - LLM 输出结构化 JSON（文本/表格）
-   │     - 保存到 structured_results/
-   │     - 支持内容溢出自动拆页
-   - 全局信号量限制所有任务 LLM 请求总并发数（MAX_LLM_CONCURRENCY）
-   - 429 限流自动退避：优先读 Retry-After，无则指数退避+随机抖动
-   - 网络错误自动退避重试
-4. 混合导出 PPTX
-   ├─ 以模板 PPTX 为基础
-   ├─ 结构化页面 → PPTBuilder 回填原生文本框/表格
-   ├─ SVG 页面 → convert_svg_to_slide_shapes 注入 DrawingML 可编辑形状
-   ├─ 删除跳过的页面 → 重排 slide 顺序
-   └─ 保存最终 PPTX
-5. 上传产物到 FTP → 清理 runtime 任务目录
-```
-
 ## API 接口
+
+> 详细接口文档见 [docs/api_reference.md](docs/api_reference.md)
 
 ### 健康检查
 
@@ -135,6 +106,7 @@ GET  /api/v1/tasks/{task_id}/download   # 下载 PPTX
 {
   "requirement_text": "请生成一份介绍智能制造平台方案的 PPT",
   "template_id": null,
+  "custom_requirements": "每页内容不超过5个要点，使用简洁的商业语言",
   "options": {
     "output_filename": "demo.pptx",
     "model": "qwen3.6-27b",
@@ -142,6 +114,15 @@ GET  /api/v1/tasks/{task_id}/download   # 下载 PPTX
   }
 }
 ```
+
+**请求字段说明：**
+
+| 字段 | 类型 | 必填 | 说明 |
+|------|------|------|------|
+| `requirement_text` | string | 是 | PPT 生成需求全文 |
+| `template_id` | string \| null | 否 | 模板 ID，为空使用默认模板 |
+| `custom_requirements` | string \| null | 否 | 用户自定义的额外要求，将注入到每页的规划和生成提示词中 |
+| `options` | object | 否 | 任务执行参数 |
 
 **`options` 字段说明：**
 
@@ -170,7 +151,10 @@ uv run pytest tests/ -x -q
 ## 开发文档
 
 - [开发说明](docs/development_notes.md)
+- [API 接口文档](docs/api_reference.md)
 - [架构设计](docs/fastapi_service_architecture.md)
 - [持久化设计](docs/mysql_ftp_persistence_design_v2.md)
 - [并发设计](docs/concurrency_design.md)
 - [混合生成设计](docs/hybrid_generation_design.md)
+- [检查规则注入方案](docs/check_rules_injection_design.md)
+- [问题修复记录](docs/bugfix_log.md)
