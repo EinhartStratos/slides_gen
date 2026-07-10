@@ -61,11 +61,11 @@
 # 安装依赖
 uv sync
 
-# 启动服务
-uv run python -m uvicorn app.main:app --reload
+# 启动服务（监听 0.0.0.0，外部可访问）
+uv run python -m uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
 ```
 
-默认访问：`http://127.0.0.1:8000`
+默认访问：`http://<本机IP>:8000`（本机可用 `http://127.0.0.1:8000`）
 
 ## API 接口
 

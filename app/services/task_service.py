@@ -5,7 +5,7 @@ from pathlib import Path
 import json
 
 from app.core.constants import TASK_STATUS_FAILED, TASK_STATUS_PENDING, TASK_STATUS_RESUMING, TASK_STATUS_STOPPED, TASK_STATUS_STOPPING
-from app.core.exceptions import ConflictError, NotFoundError
+from app.core.exceptions import ConflictError, NotFoundError, ServiceUnavailableError
 from app.core.utils import generate_id, json_dumps, to_iso
 from app.infrastructure.db.task_repository import TaskRepository
 from app.infrastructure.ppt_master.project_workspace import ProjectWorkspace
@@ -55,9 +55,12 @@ class TaskService:
         task_workspace.requirement_path.write_text(request.requirement_text, encoding="utf-8")
 
         remote_root = self.ftp.join(self.ftp.settings.ftp_root_dir, "tasks", task_id)
-        ftp_task_dir = self.ftp.ensure_dir(remote_root)
-        ftp_request_path = self.ftp.upload_file(task_workspace.request_json_path, self.ftp.join(remote_root, "request", "request.json"))
-        ftp_requirement_path = self.ftp.upload_file(task_workspace.requirement_path, self.ftp.join(remote_root, "input", "requirement.md"))
+        try:
+            ftp_task_dir = self.ftp.ensure_dir(remote_root)
+            ftp_request_path = self.ftp.upload_file(task_workspace.request_json_path, self.ftp.join(remote_root, "request", "request.json"))
+            ftp_requirement_path = self.ftp.upload_file(task_workspace.requirement_path, self.ftp.join(remote_root, "input", "requirement.md"))
+        except Exception as exc:
+            raise ServiceUnavailableError(f"FTP 存储不可用，无法创建任务: {exc}")
         ftp_template_snapshot_dir = self.ftp.join(remote_root, "template_snapshot")
         ftp_svg_output_dir = self.ftp.join(remote_root, "svg_output")
         ftp_svg_final_dir = self.ftp.join(remote_root, "svg_final")

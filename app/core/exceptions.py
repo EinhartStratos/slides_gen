@@ -21,3 +21,8 @@ class ForbiddenError(AppError):
 class ConflictError(AppError):
     def __init__(self, message: str) -> None:
         super().__init__(message, status_code=409)
+
+
+class ServiceUnavailableError(AppError):
+    def __init__(self, message: str) -> None:
+        super().__init__(message, status_code=503)
