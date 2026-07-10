@@ -64,15 +64,21 @@ class PageAnalysisPromptBuilder:
     def build_generate_system_prompt(self, page_type: str, check_rules_text: str = "", custom_requirements: str = "") -> str:
         common = (
             "你是一个 PPT 页面 SVG 生成助手。你的任务是：根据需求文本和模板页的版面结构，"
-            "生成一个全新的完整 SVG 文件。\n\n"
-            "核心原则：\n"
+            "在模板 SVG 的基础上生成一个完整的 SVG 文件。\n\n"
+            "核心原则（必须严格遵守）：\n"
             "1. 直接输出完整 SVG 代码，不要输出任何解释、markdown 或代码块标记。\n"
-            "2. 参考模板页的版面结构（矩形位置、颜色方案、字体大小），但不要保留模板中的占位文字和填写说明。\n"
+            "2. **严格保持模板页的版面结构**：必须复用模板中所有 <g>、<rect>、<text> 等元素的坐标（x、y）、"
+            "尺寸（width、height）、颜色（fill、stroke）、字体大小（font-size）、字体粗细（font-weight）等属性。\n"
+            "   - 不要自行创造新的布局位置，所有元素的坐标和尺寸必须与模板一致\n"
+            "   - 不要改变模板的颜色方案，所有 fill、stroke 等颜色值必须与模板一致\n"
+            "   - 不要改变模板的字体大小和样式，所有 font-size、font-weight、font-family 必须与模板一致\n"
+            "   - 保持模板中的装饰元素（色块、线条、背景矩形等）原样不变\n"
             "3. 模板中的【填写说明】、示例文字、占位符等全部删除，替换为根据需求生成的实际内容。\n"
+            "   - 只替换文字内容（tspan/text 的文本节点），不要改变容纳这些文字的元素的属性\n"
             "4. 保持 SVG 的 xmlns 命名空间、viewBox、width、height 等属性不变。\n"
             "5. 输出的 SVG 必须是完整的、可独立解析的 SVG 文件。\n"
             "6. 排版规则（非常重要）：\n"
-            "   - 参考模板中各文本框的 y 坐标来放置内容，不要自行创造过大的间距\n"
+            "   - 严格使用模板中各文本框的 y 坐标来放置内容，不要自行创造过大的间距\n"
             "   - 章节标题之间、段落之间保持紧凑，不要留下大段空白（不超过50像素的间距）\n"
             "   - 同一文本框内的多行文字使用 tspan 的 dy 属性换行，行间距设为24-28像素\n"
             "   - 不要让不同文本框的文字在 y 坐标上重叠\n"
@@ -112,13 +118,15 @@ class PageAnalysisPromptBuilder:
         elif page_type == "diagram":
             return common + (
                 "\n图形页特殊要求：\n"
+                "- **必须保持模板页的整体版面结构**：标题位置、装饰元素、背景色块等必须与模板一致\n"
                 "- 在模板中图形占位区域的位置，用 SVG 基本图形元素（rect、line、path、text）绘制架构图或流程图\n"
+                "- 图形区域的边界范围必须与模板中预留的图形区域一致，不要超出或缩小\n"
                 "- 用矩形表示系统/模块，用线条和箭头表示连接关系\n"
                 "- 每个矩形内填写系统名称，线条旁可标注接口类型\n"
                 "- 新建系统用特殊颜色标识，现有系统用灰色或无填充\n"
                 "- 联机接口用实线，批量接口用虚线\n"
                 "- 图形元素必须使用 SVG 基本标签（rect、line、path、text），不要使用 image 标签\n"
-                "- 图形要适配模板中预留的图形区域大小和位置\n"
+                "- 模板中的标题文字样式（字体大小、颜色、位置）必须保持不变，只替换文字内容\n"
             )
         elif page_type == "end":
             return common + (
@@ -151,9 +159,13 @@ class PageAnalysisPromptBuilder:
             f"当前是第 {page_no} 页，页面名称：{page_name}\n",
             f"页面类型：{page_type}\n",
             f"页面标题：{page_title}\n\n",
-            f"模板页 SVG 内容（参考其版面结构和样式，但不要保留占位文字）：\n{svg_content.strip()}\n\n",
+            f"模板页 SVG 内容（必须严格保持其版面结构、坐标、颜色、字体样式，只替换文字内容，不要保留占位说明文字）：\n{svg_content.strip()}\n\n",
         ]
         if custom_requirements and custom_requirements.strip():
             parts.append(f"用户自定义要求：\n{custom_requirements.strip()}\n\n")
-        parts.append("请根据需求文本的内容，参考模板的版面结构，生成一个全新的完整 SVG。")
+        parts.append(
+            "请根据需求文本的内容，严格保持模板的版面结构、颜色方案和字体样式，"
+            "只将模板中的占位文字和填写说明替换为实际内容，生成一个完整的 SVG。\n"
+            "重要提醒：不要重新创造布局，必须复用模板中所有元素的坐标、尺寸、颜色和样式属性。"
+        )
         return "".join(parts)

@@ -91,6 +91,23 @@ class TaskRepository:
         sql = f"UPDATE sg_generation_task SET {assignments} WHERE task_id = %s"
         self.db.execute(sql, params)
 
+    def mark_stale_running_tasks_as_failed(self) -> int:
+        """服务重启时，将仍处于 running/stopping/resuming 状态的任务标记为 failed。返回受影响行数。"""
+        sql = (
+            "UPDATE sg_generation_task "
+            "SET status = %s, current_stage = %s, error_message = %s "
+            "WHERE status IN (%s, %s, %s)"
+        )
+        params = (
+            "failed",
+            "interrupted",
+            "服务重启，任务被中断",
+            "running",
+            "stopping",
+            "resuming",
+        )
+        return self.db.execute(sql, params)
+
     def upsert_page(self, payload: dict[str, Any]) -> None:
         sql = """
         INSERT INTO sg_generation_task_page (

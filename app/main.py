@@ -27,6 +27,15 @@ async def lifespan(app: FastAPI):
     print(settings.llm_model)
     services.builtin_template_service.repository.db.ping()
     services.container.workspace.ensure_runtime_dirs()
+
+    # 服务重启时，将之前仍在运行中的任务标记为失败
+    try:
+        affected = services.task_service.repository.mark_stale_running_tasks_as_failed()
+        if affected > 0:
+            logger.warning("服务重启：已将 %d 个未完成任务标记为失败", affected)
+    except Exception:
+        logger.warning("清理未完成任务失败: %s", traceback.format_exc())
+
     try:
         services.builtin_template_service.ensure_default_template()
     except Exception as exc:
