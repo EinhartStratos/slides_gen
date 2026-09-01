@@ -1,5 +1,9 @@
 # 内容检查规则注入方案
 
+> 文档版本：v4 补充，更新日期：2026-09-01
+>
+> **状态说明**：`check_rules.json` 与 RuleMatcher 已实现；`page_generation_rules.json` 是分离生成模式的新增全局生成规范，已确认但尚待实现。两类规则不得混为一个文件。
+
 ## 一、背景
 
 当前系统在生成 PPT 内容时，LLM 仅根据需求全文和模板规则生成内容，缺少对银行技术方案文档的规范化约束。
@@ -306,3 +310,42 @@ else:
 - ✅ `bootstrap.py` 已注入 `RuleMatcher`
 - ✅ `CreateGenerationTaskRequest` 已增加 `custom_requirements` 字段
 - ✅ 辅助脚本 `verify_rule_coverage.py`、`coverage_summary.py`、`check_json_quality.py` 已创建
+
+## 十、分离生成模式 v4 扩展【待实现】
+
+### 10.1 新增全局生成规范
+
+新增部署配置：`app/config/page_generation_rules.json`。
+
+- 只按模板固定章节标题匹配；
+- 支持 `any_contains/all_contains/equals`；
+- 支持忽略“（续）”后缀；
+- 可分别作用于 `planning/body/diagram`；
+- 不提供在线维护接口；
+- 不允许通过规则强制保留信息不足页面。
+
+JSON 结构和字段见 [分离生成计划第9节](ppt_body_diagram_separated_generation_plan.md#9-全局页面生成规范-json-设计)。
+
+### 10.2 三类要求的优先级
+
+由低到高：
+
+1. 模板填写要求；
+2. 已实现的 `check_rules.json` 自动检查规则；
+3. **【待实现】`page_generation_rules.json` 全局标题关键词生成规范**；
+4. 当前请求 `custom_requirements`。
+
+防编造是不可覆盖的硬规则：任何层级都不能要求模型填写 `requirement_text` 中不存在的业务事实。
+
+### 10.3 当前匹配缺口
+
+当前 TemplateRuleParser 的 `page_purpose` 实际只稳定产出 `cover/table/text`，diagram 专用检查规则可能漏匹配。新模式实现前必须：
+
+- 从模板固定章节标题和页面内容正确识别 diagram 需求；
+- 对 BodyTask 和 DiagramTask 复用同一 planning manifest；
+- 在页面/图形分析结果中记录 `applied_check_rule_ids` 和 `applied_global_rule_ids`；
+- 不再使用 LLM 改写后的标题作为全局规则主匹配依据。
+
+### 10.4 文档输入边界
+
+所有文档纯文本统一放入 `requirement_text`。标题后的连续长横线表示文档边界，默认至少20个 `-`；边界仅帮助理解，不产生规则或文档优先级。

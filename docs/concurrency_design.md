@@ -1,4 +1,8 @@
-# LLM 请求并发设计文档（已实现）
+# LLM 请求并发设计文档
+
+> 文档版本：v4 补充，更新日期：2026-09-01
+>
+> 当前全局信号量和退避机制已实现；GenerationRequest、BodyTask/DiagramTask 并行调度及检查点恢复为待实现扩展。
 
 ## 1. 背景
 
@@ -109,7 +113,7 @@ LLM_RATE_LIMIT_MAX_DELAY=60.0  # 限流退避最大延迟（秒）
 ```
 
 - `MAX_LLM_CONCURRENCY`：全局唯一并发控制。不管多少用户、多少任务同时运行，正在执行的 LLM 请求不超过此值
-- 不需要单任务并发配置：每个任务内部所有页面同时提交到线程池，由全局信号量控制实际并发
+- **当前实现**未使用单任务并发配置：所有页面提交线程池，由全局信号量控制 LLM 并发；v4 新模式将落实 `max_page_concurrency`，见第10.2节
 
 ### 3.2 全局信号量
 
@@ -674,3 +678,48 @@ if wait_time > 5.0:
 - 不控制 RPM（只控制并发数），如需 RPM 限制需额外实现
 - 停止任务有延迟（需等当前 LLM 请求返回）
 - 页面完成顺序不固定（最终按文件名排序解决）
+
+## 10. 分离生成模式并发扩展【待实现】
+
+### 10.1 调度关系
+
+```text
+GenerationRequest
+├─ BodyTask ─────┐
+├─ DiagramTask ──┼─→ 共享 GLOBAL_LLM_SEMAPHORE
+└─ ComposeTask ──┘   （Compose 主要为本地转换，不调用 LLM）
+```
+
+- BodyTask 与 DiagramTask 可以同时执行；
+- 两者所有 LLM 请求继续共享现有全局信号量；
+- planning manifest 对同一 generation 只生成一次，需要 single-flight/锁避免重复规划；
+- ComposeTask 等待依赖后执行，不占用 LLM 信号量，但应受本地 PPT 转换并发限制；
+- 图形部分失败不取消其它图形或正文任务。
+
+### 10.2 单任务并发
+
+当前 `max_page_concurrency` 字段未真正控制 ThreadPool。新模式应落实：
+
+- BodyTask 的页面 worker 数不超过 `max_page_concurrency`；
+- DiagramTask 的图形 worker 数不超过 `max_page_concurrency`；
+- 未传时使用服务默认值；
+- 全局 LLM 信号量仍是最终上限；
+- FTP、数据库和 SVG 校验并发也受单任务 worker 数约束，避免一次提交所有页面造成 I/O 峰值。
+
+### 10.3 失败续跑
+
+- 每个正文页和每个 diagram 都是独立检查点；
+- resume 只提交失败或缺失单元；
+- 已成功产物从 FTP 恢复；
+- 恢复后重新计算 generation 聚合状态和 ComposeTask 依赖；
+- `completed_with_warnings` 的 DiagramTask 有失败图形时允许 resume。
+
+### 10.4 建议监控
+
+新增维度：`generation_id/task_type/task_id/diagram_id`，并记录：
+
+- BodyTask 与 DiagramTask 的排队和信号量等待时间；
+- planning manifest 是否命中复用；
+- 图形成功/失败数量；
+- ComposeTask 等待依赖和本地转换耗时；
+- 5万字以上输入的平均耗时和失败率。

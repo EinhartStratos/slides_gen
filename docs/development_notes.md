@@ -1,5 +1,9 @@
 # slides_gen_server 开发说明
 
+> 文档版本：v4，更新日期：2026-09-01
+>
+> **状态说明**：当前代码仍实现 `legacy_hybrid`；正文与单图 SVG 分离模式已经完成设计、尚待代码实现。待实现内容以粗体“【待实现】”标记。
+
 ## 1. 项目结构
 
 ```text
@@ -48,9 +52,31 @@ app/
 └─ main.py
 ```
 
+新模式实现后将增加：
+
+```text
+app/
+├─ api/v1/endpoints/
+│  ├─ generations.py                 # 【待实现】输入父记录与任务关联
+│  └─ diagrams.py                    # 【待实现】SVG详情、预览、下载
+├─ schemas/
+│  ├─ generation.py                  # 【待实现】generation请求/聚合响应
+│  └─ diagram.py                     # 【待实现】图形模型
+├─ infrastructure/db/
+│  ├─ generation_repository.py       # 【待实现】sg_generation_request
+│  └─ diagram_repository.py          # 【待实现】sg_generation_diagram
+├─ services/
+│  ├─ generation_service.py          # 【待实现】子任务关联与自动组装
+│  ├─ body_generation_service.py     # 【待实现】结构化正文与图片清理
+│  ├─ diagram_generation_service.py  # 【待实现】一图一个SVG
+│  └─ composition_service.py         # 【待实现】局部插图与续页
+└─ config/
+   └─ page_generation_rules.json     # 【待实现】全局标题关键词生成规范
+```
+
 ## 2. 核心生成链路
 
-### 2.1 混合生成：SVG + 结构化填充
+### 2.1 当前旧模式：SVG + 结构化填充【已实现】
 
 系统支持两种生成方式，按页面类型自动分流：
 
@@ -107,6 +133,31 @@ run_task()
 └─ finally: 清理 runtime 任务目录
 ```
 
+### 2.4 分离生成模式【待实现】
+
+```text
+GenerationRequest (generation_id)
+├─ BodyTask：所有保留页结构化填充 → body.pptx
+├─ DiagramTask：一图一个安全 SVG → diagram SVGs
+└─ ComposeTask：依赖前两项 → composed.pptx
+```
+
+核心约束：
+
+- 多个文档的解析文本统一放入 `requirement_text`，没有优先级；
+- “文档标题 + 至少20个连续 `-`”表示文档边界；
+- 5万字告警、10万字拒绝，并检查模型上下文；
+- 页面信息不足即删除，防编造不可被 custom requirements 覆盖；
+- 固定章节标题不变，封面项目名等动态占位按输入填写；
+- 背景图和右上角小 Logo 保留，其它模板图片删除；
+- Logo 默认阈值：横向75%后、纵向20%内、面积不超过5%，均可配置；
+- 图形不能覆盖文字或超出版面，放不下则复制章节版式；
+- SVG 直接净化预览，不转换 PNG；
+- 部分图形失败仍组装成功图形，状态为 `completed_with_warnings`；
+- 已成功子任务和图形从 FTP 恢复，失败任务只继续缺失部分。
+
+完整流程见 [ppt_body_diagram_separated_generation_plan.md](ppt_body_diagram_separated_generation_plan.md)。
+
 ## 3. LLM 客户端
 
 ### 3.1 动态模型和思考模式
@@ -156,6 +207,10 @@ run_task()
 
 创建任务时可通过 `custom_requirements` 字段传入用户自定义的额外要求。该字段随 `request_payload_json` 持久化到数据库，运行时注入到每页的规划和生成提示词中（system prompt 和 user prompt）。
 
+### 4.4 全局页面生成规范【待实现】
+
+`app/config/page_generation_rules.json` 按模板固定章节标题匹配正向生成规范，不提供在线维护接口。优先级由低到高：模板要求 → `check_rules.json` → `page_generation_rules.json` → `custom_requirements`；防编造始终是不可覆盖的硬规则。
+
 ## 5. 存储策略
 
 ### 5.1 FTP 存储
@@ -202,6 +257,14 @@ run_task()
 - 支持内容溢出自动拆页
 - 支持注入检查规则和自定义要求
 
+### 7.4 新模式 Prompt【待实现】
+
+- 共享规划输出信息充分性、是否保留、图形需求和 requirement_text 原文证据；
+- 正文 Prompt 只允许 text/table，禁止生成或修改固定章节标题；
+- 图形 Prompt 只输出一个图形 SVG，不包含整页背景、页脚和章节正文；
+- 所有页面携带完整 requirement_text；
+- 标题与连续长横线作为文档边界，不代表优先级。
+
 ## 8. 图标资源
 
 `app/vendor/ppt_master/templates/icons/` 下的 SVG 图标被以下脚本使用：
@@ -222,11 +285,11 @@ run_task()
 
 ## 10. 相关文档
 
-- [API 接口文档](api_reference.md)
+- [API 接口文档（含新模式前端契约）](api_reference.md)
+- [正文与单图 SVG 分离生成计划 v4](ppt_body_diagram_separated_generation_plan.md)
 - [架构设计](fastapi_service_architecture.md)
 - [持久化设计](mysql_ftp_persistence_design_v2.md)
 - [并发设计](concurrency_design.md)
-- [混合生成设计](hybrid_generation_design.md)
 - [检查规则注入方案](check_rules_injection_design.md)
 - [问题修复记录](bugfix_log.md)
-- `sql/mysql_init_v2.sql`：建表脚本
+- `sql/mysql_init_v2.sql`：当前初始化建表脚本；新模式需新增增量迁移

@@ -2,9 +2,20 @@
 
 ## 简介
 
-基于 FastAPI 的 PPT 自动生成服务。核心流程：将 PPTX 模板转为逐页 SVG → LLM 逐页规划与生成 → 混合导出最终 PPTX。
+基于 FastAPI 的 PPT 自动生成服务。核心流程：读取 PPTX 模板 → LLM 逐页规划与生成 → 导出最终 PPTX，并使用 MySQL 保存状态、FTP 保存文件产物。
 
-系统支持两种生成方式：
+## 实现状态
+
+| 能力 | 状态 | 说明 |
+|---|---|---|
+| `legacy_hybrid` 旧模式 | **已实现** | 普通页结构化填充，diagram 页生成整页 SVG |
+| `separated_body_diagram` 新模式 | **设计已确认，待实现** | 正文、单图 SVG 独立生成，默认自动组装 |
+| `/api/v1/tasks` | **已实现** | 当前旧模式任务接口 |
+| `/api/v1/generations` 及图形接口 | **新增，待实现** | 已冻结接口契约，前端可按 API 文档预开发 |
+
+> 文档中的“新增·待实现”内容不是当前运行服务已有功能。最终方案见 [正文与单图 SVG 分离生成计划](docs/ppt_body_diagram_separated_generation_plan.md)，完整契约见 [API 接口文档](docs/api_reference.md)。
+
+当前已实现的旧模式支持两种页面生成方式：
 
 - **SVG 生成**：LLM 生成 SVG → 转为可编辑 DrawingML 形状，适用于复杂图形页（架构图、流程图等）
 - **结构化填充**：LLM 输出结构化 JSON → 直接回填模板原生文本框和表格，适用于文本/表格页，速度快、编辑性好、支持自动拆页
@@ -15,6 +26,19 @@
 - 提交生成任务（支持自定义 LLM 模型、思考模式开关、自定义要求）
 - 查询任务进度和分页状态
 - 下载最终 PPTX
+
+### 已确认的新模式目标【待实现】
+
+- 所有文档由上游合并为纯文本并放入 `requirement_text`，文档之间没有优先级；
+- 5万字开始告警，10万字硬性拒绝，并检查模型上下文容量；
+- 一个 `generation_id` 关联平级的正文任务和图形任务，组装任务依赖两者；
+- 只保留输入足以填写的模板页，禁止模型编造；
+- 所有保留页均走结构化文字/表格生成；
+- 每个图形单独生成 SVG，每页最多一个，放不下时复制章节版式；
+- 同时保留未组装正文 PPT、独立 SVG 和组装 PPT；
+- SVG 直接安全预览，不转换 PNG；
+- 模板背景图与右上角企业 Logo 保留，其它模板图片删除；
+- 图形部分失败时使用成功图形继续组装，状态为 `completed_with_warnings`。
 
 ## 目录说明
 
@@ -53,7 +77,13 @@
 | `LLM_RATE_LIMIT_MAX_RETRIES` | 429/网络错误最大重试次数 | 5 |
 | `LLM_RATE_LIMIT_BASE_DELAY` | 退避基准延迟秒数 | 1.0 |
 | `LLM_RATE_LIMIT_MAX_DELAY` | 退避最大延迟秒数 | 60.0 |
-| `SVG_PAGE_TYPES` | 使用 SVG 生成的页面类型（逗号分隔），其余走结构化填充 | diagram |
+| `SVG_PAGE_TYPES` | 旧模式中使用整页 SVG 的页面类型（逗号分隔） | diagram |
+| **`REQUIREMENT_TEXT_WARN_CHARS`** | **【新增·待实现】需求文本告警字符数** | **50000** |
+| **`REQUIREMENT_TEXT_MAX_CHARS`** | **【新增·待实现】需求文本最大字符数** | **100000** |
+| **`DOCUMENT_SEPARATOR_MIN_HYPHENS`** | **【新增·待实现】识别文档边界所需连续 `-` 数** | **20** |
+| **`LOGO_RIGHT_START_RATIO`** | **【新增·待实现】Logo 左上角最小横向位置比例** | **0.75** |
+| **`LOGO_TOP_END_RATIO`** | **【新增·待实现】Logo 左上角最大纵向位置比例** | **0.20** |
+| **`LOGO_MAX_AREA_RATIO`** | **【新增·待实现】Logo 最大版面面积比例** | **0.05** |
 
 ## 安装与启动
 
@@ -100,7 +130,21 @@ POST /api/v1/tasks/{task_id}/resume     # 恢复任务
 GET  /api/v1/tasks/{task_id}/download   # 下载 PPTX
 ```
 
-### 创建任务请求示例
+### 分离生成模式【新增·待实现】
+
+```text
+POST /api/v1/generations                                      # 创建输入并触发正文/图形任务
+GET  /api/v1/generations                                      # Generation列表
+GET  /api/v1/generations/{generation_id}                      # 聚合查询
+POST /api/v1/generations/{generation_id}/tasks                # 后续补触发正文或图形
+GET  /api/v1/generations/{generation_id}/diagrams             # 图形列表
+GET  /api/v1/tasks/{task_id}/diagrams/{diagram_id}             # 图形详情
+GET  /api/v1/tasks/{task_id}/diagrams/{diagram_id}/preview     # 直接预览安全 SVG
+GET  /api/v1/tasks/{task_id}/diagrams/{diagram_id}/download    # 下载 SVG
+GET  /api/v1/tasks/{task_id}/artifacts/{artifact_id}/download  # 精确下载正文/组装产物
+```
+
+### 创建旧模式任务请求示例【已实现】
 
 ```json
 {
@@ -115,7 +159,27 @@ GET  /api/v1/tasks/{task_id}/download   # 下载 PPTX
 }
 ```
 
-**请求字段说明：**
+### 创建新模式 Generation 示例【新增·待实现】
+
+```json
+{
+  "generation_mode": "separated_body_diagram",
+  "template_id": null,
+  "targets": ["body", "diagrams"],
+  "auto_compose": true,
+  "requirement_text": "需求文档\n----------------------------------------\n项目事实内容……\n\n工作量估算书\n----------------------------------------\n最终工作量内容……",
+  "custom_requirements": "内容简洁，禁止补充输入中不存在的事实",
+  "options": {
+    "output_filename": "demo.pptx",
+    "model": "qwen3.6-27b",
+    "enable_thinking": false
+  }
+}
+```
+
+新模式返回 `generation_id`、`body_task_id`、`diagram_task_id` 和聚合状态。正文、图形、组装结果分别作为 FTP 产物下载。字段、枚举和 Mock 响应见 [API 接口文档第4节](docs/api_reference.md#4-分离生成模式新增待实现)。
+
+**旧模式请求字段说明：**
 
 | 字段 | 类型 | 必填 | 说明 |
 |------|------|------|------|
@@ -150,11 +214,11 @@ uv run pytest tests/ -x -q
 
 ## 开发文档
 
+- [API 接口文档（含新模式前端契约）](docs/api_reference.md)
+- [正文与单图 SVG 分离生成计划 v4](docs/ppt_body_diagram_separated_generation_plan.md)
 - [开发说明](docs/development_notes.md)
-- [API 接口文档](docs/api_reference.md)
 - [架构设计](docs/fastapi_service_architecture.md)
 - [持久化设计](docs/mysql_ftp_persistence_design_v2.md)
 - [并发设计](docs/concurrency_design.md)
-- [混合生成设计](docs/hybrid_generation_design.md)
 - [检查规则注入方案](docs/check_rules_injection_design.md)
 - [问题修复记录](docs/bugfix_log.md)

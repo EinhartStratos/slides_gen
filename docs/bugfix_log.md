@@ -1,5 +1,7 @@
 # 问题修复记录
 
+> 本文只记录已经完成的历史修复，不描述待实现功能。分离生成模式的最终方案见 [ppt_body_diagram_separated_generation_plan.md](ppt_body_diagram_separated_generation_plan.md)，新增 API 契约见 [api_reference.md 第4节](api_reference.md#4-分离生成模式新增待实现)。
+
 ## 1. LLM API 返回 HTTP 400（DeepSeek）
 
 - **原因**：DeepSeek API 不支持 `enable_thinking` 参数，但请求 payload 中始终包含该字段

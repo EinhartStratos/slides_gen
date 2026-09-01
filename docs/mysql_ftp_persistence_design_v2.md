@@ -1,32 +1,38 @@
-# MySQL 持久化、FTP 存储与任务控制补充设计 V2
+# MySQL 持久化、FTP 存储与任务控制设计 V4
+
+> 更新日期：2026-09-01
+>
+> **状态说明**：现有5张表和旧任务路径已经实现；`sg_generation_request`、`sg_generation_diagram`、新字段和新 FTP 路径均为分离生成模式的已确认目标，尚待代码和增量迁移实现。
 
 ## 1. 文档目标
 
-本文档是对现有设计的收敛版补充，按最新确认要求重新统一以下规则：
+本文档统一记录当前持久化方式与 v4 分离生成目标：
 
 - 不再引入 `user_id`
 - 不再对 `api_key` 做哈希存储或加密存储
 - 所有业务表直接使用明文 `api_key`
-- 不再并存 `job_id`、`conversation_id`、`task_id`
-- 任务主键统一只保留 `task_id`
+- 不再使用 `job_id`、`conversation_id`
+- `generation_id` 表示一份不可变输入，`task_id` 表示一次具体执行任务
+- 一个 `generation_id` 可关联平级的 BodyTask/DiagramTask，以及依赖性的 ComposeTask
 
-这份文档优先于旧版补充设计文档，用于指导下一步代码实现。
+本 v4 文档与 [分离生成计划](ppt_body_diagram_separated_generation_plan.md) 共同指导下一步实现。
 
 ## 2. 最终设计结论
 
 本轮最新口径如下：
 
-- **任务主数据存 MySQL**
-- **文件主数据存 FTP**
-- **数据库只存元数据、状态、统计和 FTP 路径**
+- **Generation 输入、任务、分页、图形 metadata 存 MySQL**
+- **正文 PPT、独立 SVG、组装 PPT 和 manifest 存 FTP**
+- **数据库只存文本输入、元数据、状态、统计和 FTP 路径**
 - **SVG 不存数据库大字段，统一存 FTP**
 - **系统通过请求中的明文 `api_key` 识别调用方**
-- **各业务表直接保存明文 `api_key`**
-- **不再单独设计用户表和 API Key 表**
-- **任务主键统一使用 `task_id`**
-- **首版必须支持任务停止**
-- **首版建议支持受限恢复**
-- **必须支持按当前 `api_key` 查询全部任务 ID**
+- **不单独设计用户表和 API Key 表**
+- **`generation_id` 是输入聚合主键，`task_id` 是执行任务主键**
+- **BodyTask 与 DiagramTask 平级，ComposeTask 依赖两者**
+- **本期不新增停止能力，保留旧接口兼容**
+- **失败任务必须支持检查点续跑，只重做失败部分**
+- **所有 FTP 产物不设有效期**
+- **必须支持按当前 `api_key` 查询 Generation 和 Task**
 
 ## 3. 为什么 SVG 仍然存 FTP
 
@@ -51,11 +57,13 @@
 MySQL 负责保存：
 
 - 模板记录
-- 生成任务主记录
-- 分页生成状态
-- 任务事件日志
-- 各类产物的 FTP 路径
-- 停止 / 恢复相关状态
+- 模板与旧模式任务记录
+- **【待实现】GenerationRequest 不可变输入和聚合状态**
+- **【待实现】BodyTask/DiagramTask/ComposeTask 关联与状态**
+- 分页生成状态和 requirement_text 证据摘录
+- **【待实现】独立图形 metadata、校验结果和最终页码**
+- 任务事件日志和各类产物 FTP 路径
+- 恢复相关状态
 - 调用方对应的明文 `api_key`
 
 ## 4.2 FTP 负责什么
@@ -64,10 +72,13 @@ FTP 负责保存：
 
 - 用户上传的模板 PPTX
 - 模板导入后的 SVG 工作区
-- 任务运行中产生的 `svg_output/`
-- 任务最终确认可转 PPTX 的 `svg_final/`
-- 验证报告、请求快照、分页分析 JSON
-- 最终导出的 PPTX
+- 旧模式的 `svg_output/` 和 `svg_final/`
+- **【待实现】Generation 请求快照、requirement_text 和 planning manifest**
+- **【待实现】未组装正文 PPTX 和 page manifest**
+- **【待实现】每个独立图形的最终 SVG 和 diagram manifest**
+- **【待实现】组装后的 PPTX**
+- 验证报告和分析 JSON
+- 所有产物长期保存，不设置自动过期
 
 ## 4.3 本地运行目录负责什么
 
@@ -130,81 +141,66 @@ FTP 负责保存：
 
 ```text
 /slides_gen_server/
-├─ templates/
-│  └─ {template_id}/
-│     ├─ source/template.pptx
-│     ├─ imported/svg/
-│     ├─ imported/svg-flat/
-│     └─ manifest/template_manifest.json
-└─ tasks/
-   └─ {task_id}/
-      ├─ request/request.json
-      ├─ input/requirement.md
-      ├─ analysis/
-      ├─ svg_output/
-      ├─ svg_final/
-      ├─ validation/
-      └─ exports/generated.pptx
+├─ templates/{template_id}/
+│  ├─ source/template.pptx
+│  ├─ imported/svg/
+│  ├─ imported/svg-flat/
+│  └─ manifest/template_manifest.json
+├─ generations/{generation_id}/                 # 【待实现】
+│  ├─ request/request.json
+│  ├─ input/requirement.md
+│  └─ analysis/planning_manifest.json
+└─ tasks/{task_id}/
+   ├─ request/                                   # 旧模式兼容
+   ├─ input/                                     # 旧模式兼容
+   ├─ analysis/
+   │  ├─ page_manifest.json                      # 【待实现】body
+   │  └─ diagram_manifest.json                   # 【待实现】diagrams
+   ├─ diagrams/{diagram_id}.svg                  # 【待实现】净化后单图
+   ├─ svg_output/                                # 旧模式整页 SVG
+   ├─ svg_final/                                 # 旧模式整页 SVG
+   ├─ validation/
+   └─ exports/
+      ├─ body.pptx                               # 【待实现】
+      ├─ composed.pptx                           # 【待实现】
+      └─ generated.pptx                          # 旧模式
 ```
 
 数据库里通过 `api_key` 字段表示调用方归属；FTP 路径里不再引入 `user_id`。
 
-## 7. 任务停止与恢复设计
+## 7. 任务控制与恢复设计
 
-## 7.1 是否需要支持停止
+### 7.1 停止能力
 
-建议：**必须支持**。
+当前旧接口保留 `stop_requested/stopping/stopped`。v4 新模式本期不新增或强化停止能力，避免扩大实施范围。
 
-原因：
+### 7.2 失败恢复是硬要求
 
-- 任务执行时间长
-- 中途有多次 LLM 调用
-- 成本高
-- 用户可能临时取消需求或发现输入有问题
+允许恢复 `failed`，以及存在失败图形的 `completed_with_warnings` DiagramTask：
 
-## 7.2 是否需要支持恢复
+- BodyTask：只重做失败或缺失正文页；
+- DiagramTask：只重做失败图形；
+- ComposeTask：只重新执行本地组装；
+- 已完成结果从 FTP 读取，不重复调用模型；
+- 恢复完成后重新判断同一 generation 的自动组装依赖；
+- 模板、planning manifest 或关键产物缺失时明确拒绝恢复。
 
-建议：**支持，但做受限恢复**。
+### 7.3 状态枚举
 
-这里的“受限恢复”是指：
+执行任务状态：
 
-- 只允许恢复 `stopped` 或 `failed` 的任务
-- 只恢复未完成页和失败页
-- 已完成页直接复用已落 FTP 的产物
-- 如果模板缺失或关键产物缺失，则拒绝恢复
+- `pending/running/stopping/stopped/resuming/completed/completed_with_warnings/failed/cancelled`
 
-## 7.3 停止机制
+Generation 聚合状态：
 
-设计方式：
+- `pending/running/completed/completed_with_warnings/failed`
 
-- 在任务表中维护 `stop_requested`
-- 任务状态支持 `stopping`
-- 编排器在阶段边界和分页边界检查停止标记
-- 一旦命中安全边界，就把任务状态改为 `stopped`
+聚合子状态还包括：
 
-## 7.4 恢复机制
+- `not_requested`：没有创建该类任务；
+- `waiting`：ComposeTask 等待正文或图形前置条件。
 
-恢复时执行：
-
-- 读取任务主表状态
-- 校验模板仍可用
-- 读取分页表状态
-- 跳过 `completed` 页面
-- 重新执行 `pending`、`running`、`failed` 页面
-- 汇总已有 `svg_final` 和新产出页面后再导出 PPTX
-
-## 7.5 推荐任务状态
-
-建议任务状态为：
-
-- `pending`
-- `running`
-- `stopping`
-- `stopped`
-- `resuming`
-- `completed`
-- `failed`
-- `cancelled`
+完整状态语义以 [api_reference.md 第4.2节](api_reference.md#42-枚举值总表) 为准。
 
 ## 8. 接口补充设计
 
@@ -267,6 +263,18 @@ FTP 负责保存：
 - `status`
 - `resume_count`
 
+## 8.4 Generation 与图形接口【待实现】
+
+- `POST /api/v1/generations`：创建输入并按 targets 创建子任务；
+- `GET /api/v1/generations`：按当前 API Key 查询 Generation 列表；
+- `GET /api/v1/generations/{generation_id}`：聚合查询；
+- `POST /api/v1/generations/{generation_id}/tasks`：补触发 body/diagrams；
+- `GET /api/v1/generations/{generation_id}/diagrams`：图形列表；
+- `GET /api/v1/tasks/{task_id}/diagrams/{diagram_id}/preview`：直接 SVG 预览；
+- `GET /api/v1/tasks/{task_id}/artifacts/{artifact_id}/download`：精确产物下载。
+
+完整字段和样例见 [api_reference.md 第4节](api_reference.md#4-分离生成模式新增待实现)。
+
 ## 9. Pydantic Schema 设计约定
 
 本项目后续 Schema 统一使用 `Pydantic`。
@@ -275,7 +283,7 @@ FTP 负责保存：
 
 - 所有对外字段必须写 `description`
 - 所有可选字段必须显式写 `default=None`
-- 任务标识统一只保留 `task_id`
+- `generation_id` 只表示输入聚合，`task_id` 只表示具体执行任务，两者不得混用
 
 下面给出建议示例。
 
@@ -355,13 +363,18 @@ class GenerationTaskPageSchema(BaseModel):
 
 ## 10.1 核心表清单
 
-本次 DDL 建议包含以下 5 张核心表：
+当前 DDL 包含以下 5 张表：
 
 - `sg_template`
 - `sg_generation_task`
 - `sg_generation_task_page`
 - `sg_generation_task_artifact`
 - `sg_generation_task_event`
+
+新模式增量迁移新增 2 张表：
+
+- **`sg_generation_request`**：不可变输入与子任务聚合状态
+- **`sg_generation_diagram`**：独立图形 metadata、状态和 FTP 路径
 
 ## 10.2 表职责说明
 
@@ -423,40 +436,47 @@ class GenerationTaskPageSchema(BaseModel):
 - 导出成功
 - 异常失败
 
+### `sg_generation_request`【待实现】
+
+保存 `generation_id`、完整 requirement_text、模板、auto_compose、三个 task ID、聚合状态和 planning manifest 路径。输入开始执行后冻结。
+
+### `sg_generation_diagram`【待实现】
+
+一行一个图形，保存所属 generation/task、章节标题、图形标题/类型、最终页码、证据摘录、校验状态、布局结果和 SVG FTP 路径。SVG-only 时最终页码为空。
+
 ## 11. SVG 落盘策略
 
-建议如下：
-
-- `svg_final`：建议始终存 FTP
-- `svg_output`：建议在 `keep_artifacts=true` 时存 FTP
-- 如果开启任务恢复，建议 `svg_output` 也保留
-
-更保守的首版策略是：
-
-- 只要任务不是临时试跑，就把 `svg_output` 和 `svg_final` 都存 FTP
-
-这样后续定位问题更方便。
+- 旧模式：`svg_output` 和 `svg_final` 继续存 FTP；
+- 新模式：模型原始 SVG 可作为内部诊断产物，安全净化并校验后的最终 SVG 必须存 FTP；
+- 浏览器预览和用户下载均使用净化后的最终 SVG；
+- 一图一个文件，并在 `sg_generation_diagram` 与 artifact 表分别记录业务 metadata 和通用文件 metadata；
+- 失败恢复优先读取已完成 SVG，不重复调用模型；
+- 本期所有 SVG 不设置自动过期。
 
 ## 12. 对实现阶段的直接约束
 
 后续写代码时，请直接按以下原则实现：
 
 - 服务启动时先连 MySQL
-- 文件上传后先临时落本地，再上传 FTP
-- 任务创建成功后必须先写 MySQL 主记录，再进入后台编排
-- 每完成一页，都要更新分页表
-- 每生成一个关键产物，都要记录 `sg_generation_task_artifact`
-- 停止请求只改数据库标记，不强杀线程
-- 恢复任务时，优先读取数据库分页状态和 FTP 中的已完成产物
-- 所有按用户维度的查询，统一改为按 `api_key` 过滤
+- 模板上传后先临时落本地，再上传 FTP；新模式不上传参考文档
+- 新模式先写 `sg_generation_request`，再创建并提交子任务
+- requirement_text 5万字告警、10万字拒绝，输入开始执行后冻结
+- 每完成一页或一个图形，都更新对应检查点
+- 每生成一个关键产物，都记录 `sg_generation_task_artifact`
+- ComposeTask 只在同一 generation 的前置结果可用后创建
+- 图形部分失败时保留成功产物并允许 `completed_with_warnings`
+- 恢复优先读取数据库状态和 FTP 成功产物，只重做失败部分
+- 所有查询按明文 `api_key` 校验归属
+- 所有 FTP 产物长期保留，不做自动删除
 
 ## 13. 本文档对应的 DDL 文件
 
-本补充设计对应的建表脚本文件为：
+当前已实现建表脚本：
 
 - `sql/mysql_init_v2.sql`
 
-该脚本目标：
+分离生成模式实现时：
 
-- 你可以直接导入本地测试库
-- 后续 FastAPI 服务启动时可以直接连库联调
+- 新增独立增量迁移脚本，创建 `sg_generation_request`、`sg_generation_diagram` 并扩展现有表；
+- 同步更新 `mysql_init_v2.sql` 供全新环境初始化；
+- 迁移必须兼容历史任务，新增字段允许为空。
