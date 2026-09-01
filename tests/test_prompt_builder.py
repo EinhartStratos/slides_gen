@@ -102,3 +102,37 @@ class TestGenerateUserPrompt:
         assert "diagram" in prompt
         assert "总体架构" in prompt
         assert "<svg>template</svg>" in prompt
+
+
+class TestDiagramPrompt:
+    """单图 SVG prompt 测试"""
+
+    def test_diagram_system_prompt_contains_rules(self):
+        builder = PageAnalysisPromptBuilder()
+        prompt = builder.build_diagram_system_prompt()
+        assert "产品/系统用矩形" in prompt
+        assert "实线箭头" in prompt
+        assert "虚线箭头" in prompt
+        assert "viewBox" in prompt
+        assert "不输出整页 PPT 模板" in prompt
+
+    def test_diagram_system_prompt_contains_style_colors(self):
+        builder = PageAnalysisPromptBuilder()
+        prompt = builder.build_diagram_system_prompt()
+        assert "浅红色" in prompt
+        assert "联机" in prompt
+        assert "批量" in prompt
+
+    def test_diagram_user_prompt_contains_params(self):
+        builder = PageAnalysisPromptBuilder()
+        prompt = builder.build_diagram_user_prompt(
+            requirement_text="系统包含 A、B 两个模块。",
+            page_no=2,
+            page_name="slide_2",
+            page_title="产品连接关系图",
+            custom_requirements="画架构图",
+        )
+        assert "系统包含 A、B 两个模块" in prompt
+        assert "产品连接关系图" in prompt
+        assert "画架构图" in prompt
+        assert "只返回完整 SVG" in prompt

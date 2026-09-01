@@ -219,3 +219,42 @@ class TestRenderPage:
         out_path, final_path = service.render_page(source, output, final, page_result)
         content = out_path.read_text(encoding="utf-8")
         assert "original" in content
+
+
+class TestGenerateDiagramSvg:
+    """单图 SVG 生成接口测试"""
+
+    def test_generate_diagram_with_client(self, tmp_path):
+        mock_client = MagicMock()
+        mock_client.generate_diagram_svg.return_value = PageGenerationResult(
+            page_no=2,
+            page_name="slide_2",
+            generated_svg='<svg xmlns="http://www.w3.org/2000/svg"><rect x="10" y="10" width="100" height="50"/></svg>',
+            decision_source="llm",
+        )
+        service = SlideGenerationService(generation_client=mock_client)
+        result = service.generate_diagram_svg(
+            api_key="key",
+            requirement_text="系统包含 A、B 两个模块。",
+            page_no=2,
+            page_name="slide_2",
+            page_title="产品连接关系图",
+        )
+
+        assert result["decision_source"] == "llm"
+        assert "<svg" in (result["generated_svg"] or "")
+        call_kwargs = mock_client.generate_diagram_svg.call_args.kwargs
+        assert call_kwargs["page_title"] == "产品连接关系图"
+        assert "系统包含" in call_kwargs["requirement_text"]
+
+    def test_generate_diagram_without_client_returns_fallback(self, tmp_path):
+        service = SlideGenerationService(generation_client=None)
+        result = service.generate_diagram_svg(
+            api_key="key",
+            requirement_text="系统包含 A、B 两个模块。",
+            page_no=2,
+            page_name="slide_2",
+            page_title="产品连接关系图",
+        )
+        assert result["decision_source"] == "heuristic"
+        assert result["generated_svg"] is None

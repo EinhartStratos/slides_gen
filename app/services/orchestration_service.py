@@ -110,6 +110,15 @@ class OrchestrationService:
 
         await self._run_legacy_task(api_key, task_id, task)
 
+    def _should_force_page_as_diagram(self, custom_requirements: str, page_plan: dict) -> bool:
+        """当用户自定义要求明确包含画图意图，且当前为可生成内容页时，允许强制作为图形页处理。"""
+        if not custom_requirements or not custom_requirements.strip():
+            return False
+        keywords = ["图", "连接", "架构", "流程", "时序", "关系", "连线", "箭头", "拓扑"]
+        has_diagram_intent = any(kw in custom_requirements for kw in keywords)
+        page_type = page_plan.get("page_type", "content")
+        return has_diagram_intent and page_type in ("content", "diagram") and page_plan.get("page_no", 0) > 1
+
     async def _run_legacy_task(self, api_key: str, task_id: str, task: dict) -> None:
         task_workspace = self.workspace.task(task_id)
         self.workspace.ensure_task_dirs(task_workspace)
@@ -866,6 +875,8 @@ class OrchestrationService:
 
             lock = threading.Lock()
             counters = {"processed": 0, "completed": 0, "skipped": 0, "failed": 0}
+            # 当模板没有明确 diagram 页，但用户自定义要求中明确要画图时，允许复用一个 content 页
+            force_diagram_state = {"done": False}
 
             with ThreadPoolExecutor(max_workers=max(total_pages, 1), thread_name_prefix=f"diagram-{task_id}") as executor:
                 futures = {}
@@ -892,6 +903,7 @@ class OrchestrationService:
                         lock=lock,
                         page_rule=page_rule,
                         custom_requirements=custom_requirements,
+                        force_diagram_state=force_diagram_state,
                     )
                     futures[index] = future
 
@@ -959,6 +971,7 @@ class OrchestrationService:
         lock: threading.Lock,
         page_rule: dict | None = None,
         custom_requirements: str = "",
+        force_diagram_state: dict | None = None,
     ) -> None:
         """处理单个图形页：规划 → 生成 SVG → 校验 → 保存。"""
         page_name = source_svg.stem
@@ -999,6 +1012,19 @@ class OrchestrationService:
             check_rules_text=check_rules_text,
             custom_requirements=custom_requirements,
         )
+
+        # 兜底：如果用户明确要求画图但模板没有 diagram 页，复用第一个合适的 content 页
+        if (
+            page_plan.get("should_generate")
+            and page_plan.get("page_type") != "diagram"
+            and self._should_force_page_as_diagram(custom_requirements, page_plan)
+            and force_diagram_state is not None
+        ):
+            with force_diagram_state.get("lock", lock):
+                if not force_diagram_state.get("done"):
+                    page_plan["page_type"] = "diagram"
+                    page_plan["page_title"] = page_plan.get("page_title") or "产品连接关系图"
+                    force_diagram_state["done"] = True
 
         if not page_plan.get("should_generate", True):
             with lock:
@@ -1041,12 +1067,12 @@ class OrchestrationService:
 
         page_title = page_plan.get("page_title") or page_name
         try:
-            page_result = self.slide_service.generate_page_svg(
-                api_key,
-                requirement_text,
-                page_no,
-                source_svg,
-                page_plan,
+            page_result = self.slide_service.generate_diagram_svg(
+                api_key=api_key,
+                requirement_text=requirement_text,
+                page_no=page_no,
+                page_name=page_name,
+                page_title=page_title,
                 model=llm_model,
                 enable_thinking=llm_enable_thinking,
                 check_rules_text=check_rules_text,
@@ -1223,12 +1249,6 @@ class OrchestrationService:
                     self.ftp.download_file(str(diagram["ftp_final_svg_path"]), local_path)
                     svg_pages[page_no] = local_path
 
-            # 组装时优先使用图形 SVG，正文结构化结果中对应页码应让位
-            for page_no in list(structured_pages.keys()):
-                if page_no in svg_pages:
-                    del structured_pages[page_no]
-                    skipped_pages.discard(page_no)
-
             # 拉取模板及规则
             template = self.template_service.get_template(str(task["template_id"]))
             template_pptx_path = self.template_service.get_template_pptx_path(template)
@@ -1239,7 +1259,7 @@ class OrchestrationService:
 
             self._sync_template_snapshot_to_ftp(task, task_workspace)
 
-            # 组装最终 PPTX
+            # 组装最终 PPTX：保留正文结构化回填，图形 SVG 以插入模式叠在页面上
             output_pptx_path = task_workspace.exports_dir / "composed.pptx"
             result_pptx_path = self.hybrid_exporter.export(
                 template_pptx_path=template_pptx_path,
@@ -1248,6 +1268,7 @@ class OrchestrationService:
                 structured_pages=structured_pages,
                 skipped_pages=skipped_pages,
                 output_path=output_pptx_path,
+                insert_svg_pages=set(svg_pages.keys()),
             )
 
             ftp_composed_path = self.ftp.upload_file(

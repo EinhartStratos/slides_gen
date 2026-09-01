@@ -274,6 +274,13 @@ def test_settings(tmp_path):
         llm_rate_limit_base_delay=0.1,
         llm_rate_limit_max_delay=1.0,
         svg_page_types="diagram",
+        requirement_text_warn_chars=50000,
+        requirement_text_max_chars=100000,
+        document_separator_min_hyphens=20,
+        logo_right_start_ratio=0.75,
+        logo_top_end_ratio=0.20,
+        logo_max_area_ratio=0.05,
+        page_generation_rules_file=tmp_path / "page_generation_rules.json",
     )
 
 
@@ -344,3 +351,186 @@ def curl_data():
 @pytest.fixture
 def curl_requirement_text(curl_data):
     return curl_data["requirement_text"]
+
+
+# ──────────────────────────────────────────────
+# Mock LLM Client：为 v4 新增逻辑提供可控返回值
+# ──────────────────────────────────────────────
+class MockPageGenerationClient:
+    """模拟 LLM 生成客户端，无需真实网络请求。"""
+
+    def __init__(self, settings=None, prompt_builder=None) -> None:
+        self.settings = settings
+        self.prompt_builder = prompt_builder
+
+    @property
+    def enabled(self) -> bool:
+        return True
+
+    def _diagram_svg(self) -> str:
+        return (
+            '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 900 320" width="900" height="320">'
+            '<rect x="50" y="100" width="120" height="40" fill="#ffcccc" stroke="#d32f2f"/>'
+            '<text x="110" y="125" font-size="14" text-anchor="middle" fill="#333">产品A</text>'
+            '<rect x="250" y="100" width="120" height="40" fill="#e3f2fd" stroke="#1976d2"/>'
+            '<text x="310" y="125" font-size="14" text-anchor="middle" fill="#333">产品B</text>'
+            '<line x1="170" y1="120" x2="250" y2="120" stroke="#1976d2" stroke-width="2" marker-end="url(#arrow)"/>'
+            '<defs><marker id="arrow" markerWidth="10" markerHeight="10" refX="9" refY="3" orient="auto" markerUnits="strokeWidth">'
+            '<path d="M0,0 L0,6 L9,3 z" fill="#1976d2"/></marker></defs>'
+            '</svg>'
+        )
+
+    def _page_svg(self, svg_content: str) -> str:
+        """在模板 SVG 基础上做最小改动，返回可解析 SVG。"""
+        import re
+        marker = '<!-- mock-generated -->'
+        if marker in svg_content:
+            return svg_content
+        # 尝试在第一个 > 后插入标记，避免破坏根标签
+        return re.sub(r"(<svg[^>]*>)", r"\1" + marker, svg_content, count=1)
+
+    def plan_single_page(
+        self,
+        api_key: str,
+        requirement_text: str,
+        page_no: int,
+        page_name: str,
+        svg_content: str,
+        total_pages: int = 0,
+        model: str | None = None,
+        enable_thinking: bool = False,
+        check_rules_text: str = "",
+        custom_requirements: str = "",
+    ):
+        from app.infrastructure.llm.base import PagePlanResult
+
+        page_title = page_name
+        page_type = "content"
+        combined = f"{page_name} {requirement_text} {custom_requirements}"
+        if page_no == 1:
+            page_type = "cover"
+            page_title = "封面"
+        elif total_pages > 0 and page_no == total_pages:
+            page_type = "end"
+            page_title = "结尾"
+        elif "目录" in page_name or "toc" in page_name.lower():
+            page_type = "toc"
+        elif any(kw in combined for kw in ["架构", "流程", "时序", "图", "连接"]):
+            page_type = "diagram"
+            page_title = "产品连接关系图"
+        return PagePlanResult(
+            page_no=page_no,
+            page_name=page_name,
+            should_generate=True,
+            skip_reason="",
+            page_type=page_type,
+            page_title=page_title,
+            decision_source="mock",
+        )
+
+    def generate_page_svg(
+        self,
+        api_key: str,
+        requirement_text: str,
+        page_no: int,
+        page_name: str,
+        page_type: str,
+        page_title: str,
+        svg_content: str,
+        model: str | None = None,
+        enable_thinking: bool = False,
+        check_rules_text: str = "",
+        custom_requirements: str = "",
+    ):
+        from app.infrastructure.llm.base import PageGenerationResult
+
+        return PageGenerationResult(
+            page_no=page_no,
+            page_name=page_name,
+            generated_svg=self._page_svg(svg_content),
+            decision_source="mock",
+            raw_response_text=None,
+        )
+
+    def generate_diagram_svg(
+        self,
+        api_key: str,
+        requirement_text: str,
+        page_no: int,
+        page_name: str,
+        page_title: str,
+        model: str | None = None,
+        enable_thinking: bool = False,
+        check_rules_text: str = "",
+        custom_requirements: str = "",
+    ):
+        from app.infrastructure.llm.base import PageGenerationResult
+
+        return PageGenerationResult(
+            page_no=page_no,
+            page_name=page_name,
+            generated_svg=self._diagram_svg(),
+            decision_source="mock",
+            raw_response_text=None,
+        )
+
+    def generate_page_content(
+        self,
+        api_key: str,
+        requirement_text: str,
+        page_no: int,
+        page_name: str,
+        page_rule: dict,
+        model: str | None = None,
+        enable_thinking: bool = False,
+        check_rules_text: str = "",
+        custom_requirements: str = "",
+    ):
+        from app.infrastructure.llm.base import PageGenerationResult
+        from app.schemas.structured_generation import GeneratedElement, StructuredPageResult
+
+        return StructuredPageResult(
+            page_no=page_no,
+            should_generate=True,
+            skip_reason="",
+            elements=[
+                GeneratedElement(
+                    id="title",
+                    type="text",
+                    content=f"第 {page_no} 页标题",
+                ),
+                GeneratedElement(
+                    id="body",
+                    type="text",
+                    content="Mock 生成的正文内容。",
+                ),
+            ],
+        )
+
+
+@pytest.fixture
+def client_with_mock_llm(test_settings, monkeypatch):
+    """使用 Mock LLM Client 的 TestClient，适用于测试需要 LLM 返回可控值的 v4 流程。"""
+    from app.core.config import get_settings
+    get_settings.cache_clear()
+
+    monkeypatch.setattr("app.services.container.MySQLDatabase", MockMySQLDatabase)
+    monkeypatch.setattr("app.services.container.PptxToSvgAdapter", MockPptxToSvgAdapter)
+    monkeypatch.setattr("app.services.container.SvgToPptxAdapter", MockSvgToPptxAdapter)
+    monkeypatch.setattr("app.core.config.get_settings", lambda: test_settings)
+    # 替换 OpenAILikePageGenerationClient 为 Mock，使 plan/generate 都走 mock
+    monkeypatch.setattr(
+        "app.services.bootstrap.OpenAILikePageGenerationClient",
+        MockPageGenerationClient,
+    )
+    monkeypatch.setattr(
+        "app.infrastructure.llm.openai_like_client.OpenAILikePageGenerationClient",
+        MockPageGenerationClient,
+    )
+
+    from app.main import app
+
+    with TestClient(app) as c:
+        yield c
+
+    get_settings.cache_clear()

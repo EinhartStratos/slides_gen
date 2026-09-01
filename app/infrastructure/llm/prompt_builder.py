@@ -1,6 +1,41 @@
 from __future__ import annotations
 
 
+# 产品/系统连接图通用绘制规范（从 v4 案例抽象而来）
+DIAGRAM_DRAWING_RULES = """
+通用画图规范（必须遵守）：
+
+1. 元素表示
+   - 产品/系统用矩形（<rect>）表示。
+   - 需要改造的产品：填充浅红色 #ffcccc，边框 #d32f2f。
+   - 仅配合测试的产品：无填充（透明/白色），边框 #999999。
+   - 矩形内居中显示产品名称，字体 14-16px，颜色 #333333，粗细 normal。
+   - 矩形尺寸 120x40 像素，同列/同行尽量对齐，间距不少于 30 像素。
+
+2. 连接关系
+   - 联机接口（http/IPS-D/实时调用）用实线箭头表示，颜色 #1976d2（蓝色）。
+   - 批量接口（FTP/文件传输）用虚线箭头表示，stroke-dasharray="6,3"，颜色 #424242（深灰）。
+   - 新增的系统关系：线条与箭头颜色用红色 #e53935，并在箭头旁标注“新增”。
+   - 已有的系统关系：使用默认实线/虚线颜色，不额外标注。
+   - 箭头旁标注接口形式（如 http、FTP、IPS-D），字体 10-12px，颜色 #555555。
+
+3. 布局要求
+   - 整体图形在 viewBox 中水平居中、底部偏下区域摆放（留出上半部分给模板标题/正文）。
+   - 产品按属性从左到右分区域排列：
+     渠道类 → 业务类 → 平台类 → 后线类
+   - 同类产品在垂直方向上尽量对齐，区域之间留出 60-80 像素间隔。
+   - 连线尽量减少交叉：优先使用直角折线（L 型），必要时用曲线或分段 path。
+
+4. 输出要求
+   - 只输出一个完整的 <svg> 元素，不要输出 markdown、代码块或整页 PPT 模板。
+   - SVG 背景透明（不设置 fill 或 fill="none"）。
+   - 建议 viewBox="0 0 900 320"，width="900"，height="320"，内容在 (50, 60) 到 (850, 280) 区域内。
+   - 所有图形使用 SVG 基本标签：rect、line、path、text、tspan、marker（箭头）。
+   - 不要使用 <image>、<foreignObject>、<style> 块或脚本。
+"""
+
+
+
 class PageAnalysisPromptBuilder:
     def build_plan_system_prompt(self, check_rules_text: str = "", custom_requirements: str = "") -> str:
         prompt = (
@@ -167,5 +202,52 @@ class PageAnalysisPromptBuilder:
             "请根据需求文本的内容，严格保持模板的版面结构、颜色方案和字体样式，"
             "只将模板中的占位文字和填写说明替换为实际内容，生成一个完整的 SVG。\n"
             "重要提醒：不要重新创造布局，必须复用模板中所有元素的坐标、尺寸、颜色和样式属性。"
+        )
+        return "".join(parts)
+
+    def build_diagram_system_prompt(self, check_rules_text: str = "", custom_requirements: str = "") -> str:
+        prompt = (
+            "你是一个专业的系统架构/产品连接图 SVG 绘制助手。你的任务是根据需求文本，"
+            "绘制一张独立的产品连接关系图（只输出图形本身，不输出整页 PPT 模板）。\n\n"
+            f"{DIAGRAM_DRAWING_RULES}\n\n"
+            "绘图步骤（必须遵循）：\n"
+            "1. 从需求文本中提取所有产品/系统名称。\n"
+            "2. 识别每个产品的属性：改造状态（需要改造 / 仅配合测试）、业务分类（渠道 / 业务 / 平台 / 后线）。\n"
+            "3. 根据分类从左到右排列产品，按矩形绘制。\n"
+            "4. 根据需求中的接口说明绘制连线：实线箭头（联机）、虚线箭头（批量）。\n"
+            "5. 对明显的新增关系使用红色线条并在箭头旁标注“新增”。\n"
+            "6. 将图形整体放在 viewBox 的下半部分，避免占用上半部分。\n"
+            "7. 输出完整、可直接解析的 SVG 字符串。"
+        )
+        if check_rules_text:
+            prompt += (
+                "\n\n以下是该页面需要遵守的检查规则，生成图形时必须严格遵循：\n"
+                f"{check_rules_text}"
+            )
+        if custom_requirements and custom_requirements.strip():
+            prompt += (
+                "\n\n以下是用户额外提出的自定义要求，生成图形时必须遵循：\n"
+                f"{custom_requirements.strip()}"
+            )
+        return prompt
+
+    def build_diagram_user_prompt(
+        self,
+        requirement_text: str,
+        page_no: int,
+        page_name: str,
+        page_title: str,
+        custom_requirements: str = "",
+    ) -> str:
+        parts = [
+            f"需求文本：\n{requirement_text.strip()}\n\n",
+            f"当前是第 {page_no} 页，页面名称：{page_name}\n",
+            f"页面标题：{page_title}\n\n",
+        ]
+        if custom_requirements and custom_requirements.strip():
+            parts.append(f"用户自定义要求：\n{custom_requirements.strip()}\n\n")
+        parts.append(
+            "请根据需求文本中的产品列表和接口关系，绘制一张产品连接关系图。\n"
+            "只返回完整 SVG 代码，不要返回任何解释、markdown、代码块或整页 PPT 模板。"
         )
         return "".join(parts)

@@ -182,6 +182,34 @@ class TestGenerateRetry:
         assert result.generated_svg is None
 
 
+class TestGenerateDiagram:
+    def test_generate_diagram_succeeds(self, tmp_path):
+        """generate_diagram_svg 成功返回独立 SVG"""
+        client = make_client(tmp_path)
+        svg_content = '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 900 320"><rect x="50" y="100" width="100" height="40"/></svg>'
+        with patch.object(client, "_call_llm", return_value=svg_content):
+            result = client.generate_diagram_svg("key", "系统包含 A、B。", 2, "slide_2", "产品连接关系图")
+        assert result.decision_source == "llm"
+        assert result.generated_svg is not None
+        assert "viewBox" in result.generated_svg
+
+    def test_generate_diagram_no_svg_returns_failed(self, tmp_path):
+        client = make_client(tmp_path)
+        with patch.object(client, "_call_llm", return_value="没有 SVG"):
+            result = client.generate_diagram_svg("key", "系统包含 A、B。", 2, "slide_2", "产品连接关系图")
+        assert result.decision_source == "failed"
+
+    def test_generate_diagram_disabled_returns_fallback(self, tmp_path):
+        """LLM 未配置时返回 fallback 占位图"""
+        settings = make_settings(tmp_path)
+        settings.llm_base_url = ""
+        client = OpenAILikePageGenerationClient(settings, PageAnalysisPromptBuilder())
+        result = client.generate_diagram_svg("key", "系统包含 A、B。", 2, "slide_2", "产品连接关系图")
+        assert result.decision_source == "fallback"
+        assert result.generated_svg is not None
+        assert "<svg" in result.generated_svg
+
+
 class TestExtractSvg:
     def test_plain_svg(self):
         svg = '<svg xmlns="http://www.w3.org/2000/svg"><text>test</text></svg>'

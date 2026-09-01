@@ -280,6 +280,83 @@ class OpenAILikePageGenerationClient(BasePageGenerationClient):
         logger.warning("LLM 页面生成重试 %s 次仍失败 (page=%s)，该页将不输出", max_retries, page_no)
         return self._generate_failed(page_no, page_name, raw_response="重试3次仍失败")
 
+    def generate_diagram_svg(
+        self,
+        api_key: str,
+        requirement_text: str,
+        page_no: int,
+        page_name: str,
+        page_title: str,
+        model: str | None = None,
+        enable_thinking: bool = False,
+        check_rules_text: str = "",
+        custom_requirements: str = "",
+    ) -> PageGenerationResult:
+        """生成单张图形 SVG（不依赖模板整页 SVG）。"""
+        if not self.enabled or not api_key.strip():
+            return self._generate_fallback_diagram(page_no, page_name)
+        max_retries = 3
+        for attempt in range(1, max_retries + 1):
+            try:
+                content = self._call_llm(
+                    api_key=api_key,
+                    system_prompt=self.prompt_builder.build_diagram_system_prompt(
+                        check_rules_text=check_rules_text,
+                        custom_requirements=custom_requirements,
+                    ),
+                    user_prompt=self.prompt_builder.build_diagram_user_prompt(
+                        requirement_text=requirement_text,
+                        page_no=page_no,
+                        page_name=page_name,
+                        page_title=page_title,
+                        custom_requirements=custom_requirements,
+                    ),
+                    model=model,
+                    enable_thinking=enable_thinking,
+                )
+                svg_text = self._extract_svg(content)
+                if not svg_text:
+                    logger.warning("LLM 返回内容中未找到有效 SVG (diagram page=%s, attempt=%s/%s)", page_no, attempt, max_retries)
+                    if attempt < max_retries:
+                        time_module.sleep(2 * attempt)
+                        continue
+                    return self._generate_failed(page_no, page_name, raw_response=content)
+                return PageGenerationResult(
+                    page_no=page_no,
+                    page_name=page_name,
+                    generated_svg=svg_text,
+                    decision_source="llm",
+                    raw_response_text=content,
+                )
+            except Exception as exc:
+                logger.warning("LLM 图形生成失败 (diagram page=%s, attempt=%s/%s): %s", page_no, attempt, max_retries, exc)
+                if attempt < max_retries:
+                    time_module.sleep(2 * attempt)
+        logger.warning("LLM 图形生成重试 %s 次仍失败 (diagram page=%s)，该页将不输出", max_retries, page_no)
+        return self._generate_failed(page_no, page_name, raw_response="重试3次仍失败")
+
+    def _generate_fallback_diagram(self, page_no: int, page_name: str) -> PageGenerationResult:
+        """LLM 未配置时的安全 fallback：返回一张占位示意图。"""
+        svg = (
+            '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 900 320" width="900" height="320">'
+            '<rect x="50" y="80" width="120" height="40" fill="#ffcccc" stroke="#d32f2f"/>'
+            '<text x="110" y="105" font-size="14" text-anchor="middle" fill="#333">产品A</text>'
+            '<rect x="250" y="80" width="120" height="40" fill="#e3f2fd" stroke="#1976d2"/>'
+            '<text x="310" y="105" font-size="14" text-anchor="middle" fill="#333">产品B</text>'
+            '<line x1="170" y1="100" x2="250" y2="100" stroke="#1976d2" stroke-width="2" marker-end="url(#arrow)"/>'
+            '<defs><marker id="arrow" markerWidth="10" markerHeight="10" refX="9" refY="3" orient="auto" markerUnits="strokeWidth">'
+            '<path d="M0,0 L0,6 L9,3 z" fill="#1976d2"/></marker></defs>'
+            '<text x="450" y="220" font-size="18" text-anchor="middle" fill="#999">（LLM 未配置，使用占位图形）</text>'
+            '</svg>'
+        )
+        return PageGenerationResult(
+            page_no=page_no,
+            page_name=page_name,
+            generated_svg=svg,
+            decision_source="fallback",
+            raw_response_text=None,
+        )
+
     def generate_page_content(
         self,
         api_key: str,

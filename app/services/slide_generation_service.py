@@ -3,7 +3,8 @@ from __future__ import annotations
 from pathlib import Path
 import json
 import logging
-from xml.etree import ElementTree as ET
+
+from lxml import etree as ET
 
 from app.infrastructure.llm.base import BasePageGenerationClient
 from app.infrastructure.ppt_master.project_workspace import TaskWorkspace
@@ -139,6 +140,40 @@ class SlideGenerationService:
             "raw_response_text": None,
         }
 
+    def generate_diagram_svg(
+        self,
+        api_key: str,
+        requirement_text: str,
+        page_no: int,
+        page_name: str,
+        page_title: str,
+        model: str | None = None,
+        enable_thinking: bool = False,
+        check_rules_text: str = "",
+        custom_requirements: str = "",
+    ) -> dict:
+        """生成单张图形 SVG（独立于模板页面）。"""
+        if self.generation_client is not None:
+            result = self.generation_client.generate_diagram_svg(
+                api_key=api_key,
+                requirement_text=requirement_text,
+                page_no=page_no,
+                page_name=page_name,
+                page_title=page_title,
+                model=model,
+                enable_thinking=enable_thinking,
+                check_rules_text=check_rules_text,
+                custom_requirements=custom_requirements,
+            )
+            return result.model_dump(mode="json")
+        return {
+            "page_no": page_no,
+            "page_name": page_name,
+            "generated_svg": None,
+            "decision_source": "heuristic",
+            "raw_response_text": None,
+        }
+
     def write_plan(self, workspace: TaskWorkspace, plans: list[dict]) -> Path:
         output_path = workspace.analysis_dir / "page_plans.json"
         output_path.write_text(json.dumps(plans, ensure_ascii=False, indent=2), encoding="utf-8")
@@ -182,4 +217,4 @@ class SlideGenerationService:
             },
             ensure_ascii=False,
         )
-        tree.write(svg_path, encoding="utf-8", xml_declaration=True)
+        tree.write(svg_path, encoding="utf-8", xml_declaration=True, pretty_print=False)

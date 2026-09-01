@@ -73,6 +73,7 @@ class HybridPptxExporter:
         structured_pages: dict[int, StructuredPageResult],
         skipped_pages: set[int],
         output_path: Path,
+        insert_svg_pages: set[int] | None = None,
     ) -> Path:
         """整合两种来源的页面，导出最终 PPTX。
 
@@ -88,6 +89,8 @@ class HybridPptxExporter:
         original_slide_count = len(presentation.slides)
         page_rule_map = {int(page["page_no"]): page for page in template_rules.get("pages", [])}
 
+        insert_svg_pages = insert_svg_pages or set()
+
         # 页码 → 实际占用的 slide 索引列表（结构化页面可能拆页产生多个 slide）
         page_to_slide_indices: dict[int, list[int]] = {}
         # 需要删除的 slide 索引
@@ -100,7 +103,11 @@ class HybridPptxExporter:
                 page_to_slide_indices[page_no] = []
                 continue
 
-            if page_no in structured_pages:
+            has_structured = page_no in structured_pages
+            has_svg = page_no in svg_pages
+            insert_svg = page_no in insert_svg_pages
+
+            if has_structured:
                 result = structured_pages[page_no]
                 if not result.should_generate:
                     delete_indices.add(slide_index)
@@ -111,9 +118,14 @@ class HybridPptxExporter:
                 occupied = builder.fill_single_slide(presentation, slide_index, page_rule, result)
                 page_to_slide_indices[page_no] = occupied
 
-            elif page_no in svg_pages:
+                # v4 组装：在已回填的结构化页面上再插入图形
+                if has_svg and insert_svg:
+                    svg_file = svg_pages[page_no]
+                    self._inject_svg_slide(presentation, slide_index, svg_file, replace_existing=False)
+
+            elif has_svg:
                 svg_file = svg_pages[page_no]
-                self._inject_svg_slide(presentation, slide_index, svg_file)
+                self._inject_svg_slide(presentation, slide_index, svg_file, replace_existing=not insert_svg)
                 page_to_slide_indices[page_no] = [slide_index]
 
             else:
@@ -142,6 +154,7 @@ class HybridPptxExporter:
         presentation: Presentation,
         slide_index: int,
         svg_file: Path,
+        replace_existing: bool = True,
     ) -> None:
         """将 SVG 转换的 DrawingML 注入到模板 PPTX 的指定 slide。
 
@@ -175,11 +188,12 @@ class HybridPptxExporter:
             logger.warning("目标 slide 中未找到 spTree (slide=%s)", slide_index)
             return
 
-        # 删除目标 slide 中所有现有 shape（保留 nvGrpSpPr 和 grpSpPr）
-        for child in list(target_sp_tree):
-            tag = etree.QName(child).localname
-            if tag not in ("nvGrpSpPr", "grpSpPr"):
-                target_sp_tree.remove(child)
+        # 仅在替换模式下删除目标 slide 中所有现有 shape（保留 nvGrpSpPr 和 grpSpPr）
+        if replace_existing:
+            for child in list(target_sp_tree):
+                tag = etree.QName(child).localname
+                if tag not in ("nvGrpSpPr", "grpSpPr"):
+                    target_sp_tree.remove(child)
 
         # 计算 shape ID 偏移量，避免与已有 slide 的 shape ID 冲突
         max_existing_id = self._find_max_shape_id(presentation)

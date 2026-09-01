@@ -62,6 +62,21 @@ class BasePageGenerationClient(ABC):
         raise NotImplementedError
 
     @abstractmethod
+    def generate_diagram_svg(
+        self,
+        api_key: str,
+        requirement_text: str,
+        page_no: int,
+        page_name: str,
+        page_title: str,
+        model: str | None = None,
+        enable_thinking: bool = False,
+        check_rules_text: str = "",
+        custom_requirements: str = "",
+    ) -> PageGenerationResult:
+        raise NotImplementedError
+
+    @abstractmethod
     def generate_page_content(
         self,
         api_key: str,
