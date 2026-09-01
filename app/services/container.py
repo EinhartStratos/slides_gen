@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 from app.core.config import Settings
+from app.infrastructure.db.diagram_repository import DiagramRepository
+from app.infrastructure.db.generation_repository import GenerationRepository
 from app.infrastructure.db.mysql import MySQLDatabase
 from app.infrastructure.db.task_repository import TaskRepository
 from app.infrastructure.db.template_repository import TemplateRepository
@@ -22,3 +24,5 @@ class ServiceContainer:
         self.task_runner = TaskRunner()
         self.templates = TemplateRepository(self.db)
         self.tasks = TaskRepository(self.db)
+        self.generations = GenerationRepository(self.db)
+        self.diagrams = DiagramRepository(self.db)

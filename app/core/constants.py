@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+# 通用子任务状态（含 v4 新增的 completed_with_warnings）
 TASK_STATUS_PENDING = "pending"
 TASK_STATUS_RUNNING = "running"
 TASK_STATUS_STOPPING = "stopping"
@@ -26,3 +27,54 @@ ARTIFACT_TYPE_SVG_FINAL = "svg_final"
 ARTIFACT_TYPE_RESULT_PPTX = "result_pptx"
 ARTIFACT_TYPE_VALIDATION_REPORT = "validation_report"
 ARTIFACT_TYPE_ANALYSIS_JSON = "analysis_json"
+
+# v4 新增产物类型
+ARTIFACT_TYPE_BODY_PPTX = "body_pptx"
+ARTIFACT_TYPE_COMPOSED_PPTX = "composed_pptx"
+ARTIFACT_TYPE_DIAGRAM_SVG = "diagram_svg"
+ARTIFACT_TYPE_DIAGRAM_MANIFEST = "diagram_manifest"
+ARTIFACT_TYPE_PAGE_MANIFEST = "page_manifest"
+ARTIFACT_TYPE_PLANNING_MANIFEST = "planning_manifest"
+
+# v4 任务类型
+TASK_TYPE_LEGACY = "legacy"
+TASK_TYPE_BODY = "body"
+TASK_TYPE_DIAGRAMS = "diagrams"
+TASK_TYPE_COMPOSE = "compose"
+
+# v4 生成模式
+GENERATION_MODE_LEGACY_HYBRID = "legacy_hybrid"
+GENERATION_MODE_SEPARATED_BODY_DIAGRAM = "separated_body_diagram"
+
+# v4 聚合状态
+GENERATION_STATUS_PENDING = "pending"
+GENERATION_STATUS_RUNNING = "running"
+GENERATION_STATUS_COMPLETED = "completed"
+GENERATION_STATUS_COMPLETED_WITH_WARNINGS = "completed_with_warnings"
+GENERATION_STATUS_FAILED = "failed"
+
+# v4 子能力状态
+CHILD_STATUS_NOT_REQUESTED = "not_requested"
+CHILD_STATUS_WAITING = "waiting"
+
+# v4 默认长度阈值
+REQUIREMENT_TEXT_WARN_CHARS_DEFAULT = 50000
+REQUIREMENT_TEXT_MAX_CHARS_DEFAULT = 100000
+DOCUMENT_SEPARATOR_MIN_HYPHENS_DEFAULT = 20
+
+# v4 Logo 识别默认阈值
+LOGO_RIGHT_START_RATIO_DEFAULT = 0.75
+LOGO_TOP_END_RATIO_DEFAULT = 0.20
+LOGO_MAX_AREA_RATIO_DEFAULT = 0.05
+
+# v4 页面类型
+PAGE_TYPE_COVER = "cover"
+PAGE_TYPE_TOC = "toc"
+PAGE_TYPE_CONTENT = "content"
+PAGE_TYPE_DIAGRAM = "diagram"
+PAGE_TYPE_END = "end"
+
+# v4 校验状态
+VALIDATION_STATUS_PENDING = "pending"
+VALIDATION_STATUS_PASSED = "passed"
+VALIDATION_STATUS_FAILED = "failed"

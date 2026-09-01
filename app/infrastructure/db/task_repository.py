@@ -13,7 +13,8 @@ class TaskRepository:
     def create_task(self, payload: dict[str, Any]) -> None:
         sql = """
         INSERT INTO sg_generation_task (
-            task_id, api_key, template_id, requirement_text, request_payload_json,
+            task_id, api_key, generation_id, task_type, depends_on_task_ids_json,
+            template_id, requirement_text, request_payload_json,
             status, current_stage, progress, stop_requested, resume_count,
             total_pages, processed_pages, completed_pages, skipped_pages, failed_pages,
             ftp_task_dir, ftp_request_path, ftp_requirement_path, ftp_template_snapshot_dir,
@@ -21,6 +22,7 @@ class TaskRepository:
             ftp_result_pptx_path, error_code, error_message
         ) VALUES (
             %s, %s, %s, %s, %s,
+            %s, %s, %s,
             %s, %s, %s, %s, %s,
             %s, %s, %s, %s, %s,
             %s, %s, %s, %s,
@@ -31,6 +33,9 @@ class TaskRepository:
         params = (
             payload["task_id"],
             payload["api_key"],
+            payload.get("generation_id"),
+            payload.get("task_type", "legacy"),
+            json_dumps(payload.get("depends_on_task_ids_json")) if payload.get("depends_on_task_ids_json") is not None else None,
             payload.get("template_id"),
             payload["requirement_text"],
             payload.get("request_payload_json"),
@@ -111,25 +116,34 @@ class TaskRepository:
     def upsert_page(self, payload: dict[str, Any]) -> None:
         sql = """
         INSERT INTO sg_generation_task_page (
-            task_id, page_no, page_name, template_svg_ftp_path, analysis_json_ftp_path,
-            status, should_generate, skip_reason, diagram_kind,
+            task_id, page_no, page_key, template_page_title, page_name, template_svg_ftp_path, analysis_json_ftp_path,
+            status, should_generate, information_sufficient, evidence_quotes_json, skip_reason,
+            diagram_kind, diagram_required, page_type, final_page_no,
             ftp_generated_svg_path, ftp_final_svg_path,
             validation_status, validation_message, error_message,
             started_at, completed_at
         ) VALUES (
+            %s, %s, %s, %s, %s, %s, %s,
             %s, %s, %s, %s, %s,
             %s, %s, %s, %s,
             %s, %s,
             %s, %s, %s,
             %s, %s
         ) ON DUPLICATE KEY UPDATE
+            page_key = VALUES(page_key),
+            template_page_title = VALUES(template_page_title),
             page_name = VALUES(page_name),
             template_svg_ftp_path = VALUES(template_svg_ftp_path),
             analysis_json_ftp_path = VALUES(analysis_json_ftp_path),
             status = VALUES(status),
             should_generate = VALUES(should_generate),
+            information_sufficient = VALUES(information_sufficient),
+            evidence_quotes_json = VALUES(evidence_quotes_json),
             skip_reason = VALUES(skip_reason),
             diagram_kind = VALUES(diagram_kind),
+            diagram_required = VALUES(diagram_required),
+            page_type = VALUES(page_type),
+            final_page_no = VALUES(final_page_no),
             ftp_generated_svg_path = VALUES(ftp_generated_svg_path),
             ftp_final_svg_path = VALUES(ftp_final_svg_path),
             validation_status = VALUES(validation_status),
@@ -141,13 +155,20 @@ class TaskRepository:
         params = (
             payload["task_id"],
             payload["page_no"],
+            payload.get("page_key"),
+            payload.get("template_page_title"),
             payload.get("page_name"),
             payload.get("template_svg_ftp_path"),
             payload.get("analysis_json_ftp_path"),
             payload.get("status", "pending"),
             payload.get("should_generate"),
+            payload.get("information_sufficient"),
+            json_dumps(payload.get("evidence_quotes_json")) if payload.get("evidence_quotes_json") is not None else None,
             payload.get("skip_reason"),
             payload.get("diagram_kind"),
+            payload.get("diagram_required"),
+            payload.get("page_type"),
+            payload.get("final_page_no"),
             payload.get("ftp_generated_svg_path"),
             payload.get("ftp_final_svg_path"),
             payload.get("validation_status"),
@@ -163,6 +184,10 @@ class TaskRepository:
             "SELECT * FROM sg_generation_task_page WHERE task_id = %s ORDER BY page_no ASC",
             (task_id,),
         )
+
+    def get_task_by_generation_and_type(self, generation_id: str, task_type: str) -> dict[str, Any] | None:
+        sql = "SELECT * FROM sg_generation_task WHERE generation_id = %s AND task_type = %s LIMIT 1"
+        return self.db.fetch_one(sql, (generation_id, task_type))
 
     def create_artifact(self, payload: dict[str, Any]) -> None:
         sql = """

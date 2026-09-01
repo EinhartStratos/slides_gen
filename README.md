@@ -9,9 +9,9 @@
 | 能力 | 状态 | 说明 |
 |---|---|---|
 | `legacy_hybrid` 旧模式 | **已实现** | 普通页结构化填充，diagram 页生成整页 SVG |
-| `separated_body_diagram` 新模式 | **设计已确认，待实现** | 正文、单图 SVG 独立生成，默认自动组装 |
+| `separated_body_diagram` 新模式 | **已实现（v4 基础版）** | 正文 PPTX、单页 SVG 图形、最终组装 PPTX 三产物独立生成与下载 |
 | `/api/v1/tasks` | **已实现** | 当前旧模式任务接口 |
-| `/api/v1/generations` 及图形接口 | **新增，待实现** | 已冻结接口契约，前端可按 API 文档预开发 |
+| `/api/v1/generations` 及图形接口 | **已实现（v4 基础版）** | 创建输入、查询聚合、图形列表、SVG 预览与下载、产物精确下载 |
 
 > 文档中的“新增·待实现”内容不是当前运行服务已有功能。最终方案见 [正文与单图 SVG 分离生成计划](docs/ppt_body_diagram_separated_generation_plan.md)，完整契约见 [API 接口文档](docs/api_reference.md)。
 
@@ -27,7 +27,7 @@
 - 查询任务进度和分页状态
 - 下载最终 PPTX
 
-### 已确认的新模式目标【待实现】
+### 已确认的新模式目标（v4 基础版已实现，仍有 refinement 空间）
 
 - 所有文档由上游合并为纯文本并放入 `requirement_text`，文档之间没有优先级；
 - 5万字开始告警，10万字硬性拒绝，并检查模型上下文容量；
@@ -78,12 +78,12 @@
 | `LLM_RATE_LIMIT_BASE_DELAY` | 退避基准延迟秒数 | 1.0 |
 | `LLM_RATE_LIMIT_MAX_DELAY` | 退避最大延迟秒数 | 60.0 |
 | `SVG_PAGE_TYPES` | 旧模式中使用整页 SVG 的页面类型（逗号分隔） | diagram |
-| **`REQUIREMENT_TEXT_WARN_CHARS`** | **【新增·待实现】需求文本告警字符数** | **50000** |
-| **`REQUIREMENT_TEXT_MAX_CHARS`** | **【新增·待实现】需求文本最大字符数** | **100000** |
-| **`DOCUMENT_SEPARATOR_MIN_HYPHENS`** | **【新增·待实现】识别文档边界所需连续 `-` 数** | **20** |
-| **`LOGO_RIGHT_START_RATIO`** | **【新增·待实现】Logo 左上角最小横向位置比例** | **0.75** |
-| **`LOGO_TOP_END_RATIO`** | **【新增·待实现】Logo 左上角最大纵向位置比例** | **0.20** |
-| **`LOGO_MAX_AREA_RATIO`** | **【新增·待实现】Logo 最大版面面积比例** | **0.05** |
+| `REQUIREMENT_TEXT_WARN_CHARS` | 需求文本告警字符数 | 50000 |
+| `REQUIREMENT_TEXT_MAX_CHARS` | 需求文本最大字符数 | 100000 |
+| `DOCUMENT_SEPARATOR_MIN_HYPHENS` | 识别文档边界所需连续 `-` 数 | 20 |
+| `LOGO_RIGHT_START_RATIO` | Logo 左上角最小横向位置比例 | 0.75 |
+| `LOGO_TOP_END_RATIO` | Logo 左上角最大纵向位置比例 | 0.20 |
+| `LOGO_MAX_AREA_RATIO` | Logo 最大版面面积比例 | 0.05 |
 
 ## 安装与启动
 
@@ -130,7 +130,7 @@ POST /api/v1/tasks/{task_id}/resume     # 恢复任务
 GET  /api/v1/tasks/{task_id}/download   # 下载 PPTX
 ```
 
-### 分离生成模式【新增·待实现】
+### 分离生成模式【已实现 v4 基础版】
 
 ```text
 POST /api/v1/generations                                      # 创建输入并触发正文/图形任务

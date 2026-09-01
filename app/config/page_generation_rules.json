@@ -1,0 +1,95 @@
+{
+  "schema_version": "1.0",
+  "rules": [
+    {
+      "id": "global_page_rule_001",
+      "enabled": true,
+      "description": "封面页填写规范",
+      "template_scope": ["*"],
+      "title_match": {
+        "mode": "any_contains",
+        "keywords": ["封面", "项目封面", "方案封面"],
+        "normalize_whitespace": true,
+        "ignore_suffixes": ["（续）", "(续)"]
+      },
+      "apply_to": ["planning", "body"],
+      "instruction": "封面只填写需求文本中明确的项目名称、副标题、文档编号、日期、部门等信息。没有明确依据的字段保持模板占位符或留空，禁止编造。",
+      "priority": 100
+    },
+    {
+      "id": "global_page_rule_002",
+      "enabled": true,
+      "description": "目录页填写规范",
+      "template_scope": ["*"],
+      "title_match": {
+        "mode": "any_contains",
+        "keywords": ["目录", "内容目录", "提纲"],
+        "normalize_whitespace": true,
+        "ignore_suffixes": ["（续）", "(续)"]
+      },
+      "apply_to": ["planning", "body"],
+      "instruction": "目录页只保留输入材料中实际出现的章节。不得添加未在输入中体现的章节，也不得删除已有章节。章节标题必须与输入一致。",
+      "priority": 100
+    },
+    {
+      "id": "global_page_rule_003",
+      "enabled": true,
+      "description": "结尾页填写规范",
+      "template_scope": ["*"],
+      "title_match": {
+        "mode": "any_contains",
+        "keywords": ["谢谢", "感谢", "结束", "尾页"],
+        "normalize_whitespace": true,
+        "ignore_suffixes": ["（续）", "(续)"]
+      },
+      "apply_to": ["planning", "body"],
+      "instruction": "结尾页只填写明确的感谢语或联系方式，禁止编造输入中没有的信息。",
+      "priority": 100
+    },
+    {
+      "id": "global_page_rule_004",
+      "enabled": true,
+      "description": "技术架构图生成规范",
+      "template_scope": ["*"],
+      "title_match": {
+        "mode": "any_contains",
+        "keywords": ["架构", "系统架构", "技术架构", "整体架构"],
+        "normalize_whitespace": true,
+        "ignore_suffixes": ["（续）", "(续)"]
+      },
+      "apply_to": ["planning", "body", "diagram"],
+      "instruction": "若输入材料中明确描述了系统、模块、接口及其关系，则该页保留并生成技术架构图；否则删除该页。图形必须使用输入中真实存在的系统/模块名称和接口类型，禁止编造未提及的模块。",
+      "priority": 50
+    },
+    {
+      "id": "global_page_rule_005",
+      "enabled": true,
+      "description": "流程图/时序图生成规范",
+      "template_scope": ["*"],
+      "title_match": {
+        "mode": "any_contains",
+        "keywords": ["流程", "流程图", "时序", "时序图", "交互", "接口调用"],
+        "normalize_whitespace": true,
+        "ignore_suffixes": ["（续）", "(续)"]
+      },
+      "apply_to": ["planning", "body", "diagram"],
+      "instruction": "若输入材料中包含明确的流程步骤、调用顺序或角色交互，则保留并生成流程图或时序图；否则删除该页。图中的角色、步骤、顺序必须与输入完全一致，禁止补全未提及的步骤。",
+      "priority": 50
+    },
+    {
+      "id": "global_page_rule_006",
+      "enabled": true,
+      "description": "通用内容页防编造",
+      "template_scope": ["*"],
+      "title_match": {
+        "mode": "any_contains",
+        "keywords": [""],
+        "normalize_whitespace": true,
+        "ignore_suffixes": []
+      },
+      "apply_to": ["planning", "body"],
+      "instruction": "内容页必须基于输入材料中的真实内容填写。固定章节标题不变，不允许改写。没有对应依据的页面必须删除，并在结果中记录删除原因。",
+      "priority": 1000
+    }
+  ]
+}

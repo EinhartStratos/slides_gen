@@ -79,6 +79,36 @@ async def get_task_artifacts(
     return ApiResponse(data=services.task_service.list_artifacts(api_key, task_id))
 
 
+@router.get("/tasks/{task_id}/artifacts/{artifact_id}/download")
+async def download_artifact(
+    task_id: str,
+    artifact_id: str,
+    api_key: str = Depends(get_api_key),
+    services: AppServices = Depends(get_app_services),
+):
+    artifacts = services.task_service.list_artifacts(api_key, task_id)
+    artifact = next((a for a in artifacts if a["artifact_id"] == artifact_id), None)
+    if not artifact:
+        return ApiResponse(code=404, message="产物不存在", data=None)
+    ftp_path = artifact["ftp_path"]
+    task_workspace = services.container.workspace.task(task_id)
+    local_path = services.container.ftp.download_file(str(ftp_path), task_workspace.exports_dir / Path(str(ftp_path)).name)
+    content_type = _artifact_content_type(artifact.get("artifact_type"))
+    return FileResponse(
+        path=local_path,
+        filename=Path(str(ftp_path)).name or local_path.name,
+        media_type=content_type,
+    )
+
+
+def _artifact_content_type(artifact_type: str | None) -> str:
+    if artifact_type in {"result_pptx", "body_pptx", "composed_pptx"}:
+        return "application/vnd.openxmlformats-officedocument.presentationml.presentation"
+    if artifact_type in {"svg_output", "svg_final", "diagram_svg"}:
+        return "image/svg+xml"
+    return "application/octet-stream"
+
+
 @router.get("/tasks/{task_id}/download")
 async def download_task_result(
     task_id: str,

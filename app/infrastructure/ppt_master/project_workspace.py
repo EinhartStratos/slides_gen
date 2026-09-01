@@ -39,6 +39,18 @@ class TaskWorkspace:
     result_pptx_path: Path
 
 
+@dataclass(slots=True)
+class GenerationWorkspace:
+    root: Path
+    request_dir: Path
+    request_json_path: Path
+    input_dir: Path
+    requirement_path: Path
+    tasks_dir: Path
+    planning_dir: Path
+    planning_manifest_path: Path
+
+
 class ProjectWorkspace:
     def __init__(self, settings: Settings) -> None:
         self.settings = settings
@@ -49,9 +61,15 @@ class ProjectWorkspace:
             self.runtime_dir,
             self.runtime_dir / "templates",
             self.runtime_dir / "tasks",
+            self.runtime_dir / "generations",
             self.runtime_dir / "temp",
         ]:
             path.mkdir(parents=True, exist_ok=True)
+
+    def temp_path(self, name: str) -> Path:
+        path = self.runtime_dir / "temp" / name
+        path.parent.mkdir(parents=True, exist_ok=True)
+        return path
 
     def template(self, template_id: str) -> TemplateWorkspace:
         root = self.runtime_dir / "templates" / template_id
@@ -87,6 +105,29 @@ class ProjectWorkspace:
             assets_dir=root / "assets",
             result_pptx_path=root / "exports" / "generated.pptx",
         )
+
+    def generation(self, generation_id: str) -> GenerationWorkspace:
+        root = self.runtime_dir / "generations" / generation_id
+        return GenerationWorkspace(
+            root=root,
+            request_dir=root / "request",
+            request_json_path=root / "request" / "request.json",
+            input_dir=root / "input",
+            requirement_path=root / "input" / "requirement.md",
+            tasks_dir=root / "tasks",
+            planning_dir=root / "planning",
+            planning_manifest_path=root / "planning" / "planning_manifest.json",
+        )
+
+    def ensure_generation_dirs(self, workspace: GenerationWorkspace) -> None:
+        for path in [
+            workspace.root,
+            workspace.request_dir,
+            workspace.input_dir,
+            workspace.tasks_dir,
+            workspace.planning_dir,
+        ]:
+            path.mkdir(parents=True, exist_ok=True)
 
     def ensure_template_dirs(self, workspace: TemplateWorkspace) -> None:
         for path in [

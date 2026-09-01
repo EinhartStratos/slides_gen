@@ -25,6 +25,12 @@ def json_dumps(payload: object) -> str:
     return json.dumps(payload, ensure_ascii=False, indent=2, default=str)
 
 
+def json_loads(text: str | bytes) -> object:
+    if isinstance(text, bytes):
+        text = text.decode("utf-8")
+    return json.loads(text)
+
+
 def to_iso(value: object) -> str | None:
     if value is None:
         return None

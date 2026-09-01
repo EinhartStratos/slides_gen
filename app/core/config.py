@@ -41,6 +41,13 @@ class Settings:
     llm_rate_limit_base_delay: float
     llm_rate_limit_max_delay: float
     svg_page_types: str
+    requirement_text_warn_chars: int = 50000
+    requirement_text_max_chars: int = 100000
+    document_separator_min_hyphens: int = 20
+    logo_right_start_ratio: float = 0.75
+    logo_top_end_ratio: float = 0.20
+    logo_max_area_ratio: float = 0.05
+    page_generation_rules_file: Path | None = None
 
 
 def _get(key: str, default: str = "") -> str:
@@ -48,6 +55,13 @@ def _get(key: str, default: str = "") -> str:
     if val is not None and val != "":
         return val
     return default
+
+
+def _resolve_path(raw: str) -> Path:
+    path = Path(raw)
+    if not path.is_absolute():
+        path = ROOT_DIR / path
+    return path
 
 
 @lru_cache(maxsize=1)
@@ -92,4 +106,11 @@ def get_settings() -> Settings:
         llm_rate_limit_base_delay=float(_get("LLM_RATE_LIMIT_BASE_DELAY", "1.0") or "1.0"),
         llm_rate_limit_max_delay=float(_get("LLM_RATE_LIMIT_MAX_DELAY", "60.0") or "60.0"),
         svg_page_types=_get("SVG_PAGE_TYPES", "diagram"),
+        requirement_text_warn_chars=int(_get("REQUIREMENT_TEXT_WARN_CHARS", "50000") or "50000"),
+        requirement_text_max_chars=int(_get("REQUIREMENT_TEXT_MAX_CHARS", "100000") or "100000"),
+        document_separator_min_hyphens=int(_get("DOCUMENT_SEPARATOR_MIN_HYPHENS", "20") or "20"),
+        logo_right_start_ratio=float(_get("LOGO_RIGHT_START_RATIO", "0.75") or "0.75"),
+        logo_top_end_ratio=float(_get("LOGO_TOP_END_RATIO", "0.20") or "0.20"),
+        logo_max_area_ratio=float(_get("LOGO_MAX_AREA_RATIO", "0.05") or "0.05"),
+        page_generation_rules_file=_resolve_path(_get("PAGE_GENERATION_RULES_FILE", "app/config/page_generation_rules.json")),
     )

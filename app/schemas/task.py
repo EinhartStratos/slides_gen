@@ -25,6 +25,8 @@ class CreateGenerationTaskRequest(SchemaModel):
 
 class GenerationTaskSummarySchema(SchemaModel):
     task_id: str = Field(..., description="系统内部任务唯一ID")
+    generation_id: Optional[str] = Field(default=None, description="所属输入ID；旧任务为空")
+    task_type: Optional[str] = Field(default=None, description="任务类型：legacy/body/diagrams/compose")
     status: str = Field(..., description="任务状态")
     current_stage: str = Field(..., description="任务当前所处阶段")
     progress: float = Field(..., description="任务进度，范围 0 到 100")
@@ -38,13 +40,19 @@ class GenerationTaskSummarySchema(SchemaModel):
 class GenerationTaskPageSchema(SchemaModel):
     task_id: str = Field(..., description="所属任务ID")
     page_no: int = Field(..., description="页码，从 1 开始")
+    page_key: Optional[str] = Field(default=None, description="稳定页键")
     page_name: Optional[str] = Field(default=None, description="页面名称")
+    template_page_title: Optional[str] = Field(default=None, description="模板固定章节标题")
     should_generate: Optional[bool] = Field(default=None, description="该页是否应保留到最终 PPT")
+    information_sufficient: Optional[bool] = Field(default=None, description="信息是否充足")
     skip_reason: Optional[str] = Field(default=None, description="页面被跳过时的原因")
     status: str = Field(..., description="分页执行状态")
+    page_type: Optional[str] = Field(default=None, description="页面类型：cover/toc/content/diagram/end")
+    diagram_required: Optional[bool] = Field(default=None, description="是否需要额外生成图形")
     diagram_kind: Optional[str] = Field(default=None, description="图形类型，例如 architecture 或 sequence")
     ftp_generated_svg_path: Optional[str] = Field(default=None, description="原始生成 SVG 在 FTP 上的路径")
     ftp_final_svg_path: Optional[str] = Field(default=None, description="最终确认用于转 PPTX 的 SVG 在 FTP 上的路径")
+    final_page_no: Optional[int] = Field(default=None, description="最终页码")
     error_message: Optional[str] = Field(default=None, description="该页执行失败时的错误信息")
 
 
