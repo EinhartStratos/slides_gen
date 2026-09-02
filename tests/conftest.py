@@ -400,6 +400,7 @@ class MockPageGenerationClient:
         model: str | None = None,
         enable_thinking: bool = False,
         check_rules_text: str = "",
+        page_generation_rules_text: str = "",
         custom_requirements: str = "",
     ):
         from app.infrastructure.llm.base import PagePlanResult
@@ -440,6 +441,7 @@ class MockPageGenerationClient:
         model: str | None = None,
         enable_thinking: bool = False,
         check_rules_text: str = "",
+        page_generation_rules_text: str = "",
         custom_requirements: str = "",
     ):
         from app.infrastructure.llm.base import PageGenerationResult
@@ -462,6 +464,7 @@ class MockPageGenerationClient:
         model: str | None = None,
         enable_thinking: bool = False,
         check_rules_text: str = "",
+        page_generation_rules_text: str = "",
         custom_requirements: str = "",
     ):
         from app.infrastructure.llm.base import PageGenerationResult
@@ -484,6 +487,7 @@ class MockPageGenerationClient:
         model: str | None = None,
         enable_thinking: bool = False,
         check_rules_text: str = "",
+        page_generation_rules_text: str = "",
         custom_requirements: str = "",
     ):
         from app.infrastructure.llm.base import PageGenerationResult

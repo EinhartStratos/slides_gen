@@ -61,6 +61,7 @@ class PptxBuilderService:
         model: str | None = None,
         enable_thinking: bool = False,
         check_rules_text: str = "",
+        page_generation_rules_text: str = "",
         custom_requirements: str = "",
     ) -> StructuredPageResult:
         """调用 LLM 生成单页结构化内容。
@@ -94,6 +95,7 @@ class PptxBuilderService:
             model=model,
             enable_thinking=enable_thinking,
             check_rules_text=check_rules_text,
+            page_generation_rules_text=page_generation_rules_text,
             custom_requirements=custom_requirements,
         )
 

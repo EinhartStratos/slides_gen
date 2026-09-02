@@ -9,7 +9,7 @@ from __future__ import annotations
 import json
 
 
-def build_structured_system_prompt(check_rules_text: str = "", custom_requirements: str = "") -> str:
+def build_structured_system_prompt(check_rules_text: str = "", page_generation_rules_text: str = "", custom_requirements: str = "") -> str:
     """构建结构化生成的 system prompt。
 
     Args:
@@ -30,6 +30,11 @@ def build_structured_system_prompt(check_rules_text: str = "", custom_requiremen
         prompt += (
             "\n\n以下是该页面需要遵守的检查规则，生成内容时必须严格遵循：\n"
             f"{check_rules_text}"
+        )
+    if page_generation_rules_text:
+        prompt += (
+            "\n\n【全局页面生成规范】命中本章节后必须遵守的正向生成要求（优先级高于检查规则）：\n"
+            f"{page_generation_rules_text}"
         )
     if custom_requirements and custom_requirements.strip():
         prompt += (
@@ -62,7 +67,7 @@ def _build_model_rule_view(page_rule: dict) -> dict:
     }
 
 
-def build_structured_user_prompt(requirement_text: str, page_rule: dict, custom_requirements: str = "") -> str:
+def build_structured_user_prompt(requirement_text: str, page_rule: dict, page_generation_rules_text: str = "", custom_requirements: str = "") -> str:
     """构建结构化生成的 user prompt。
 
     Args:
@@ -104,6 +109,8 @@ def build_structured_user_prompt(requirement_text: str, page_rule: dict, custom_
         f"单页模板规则：\n{json.dumps(model_page_rule, ensure_ascii=False, indent=2)}\n\n"
         f"输出 JSON 结构示例：\n{json.dumps(output_schema, ensure_ascii=False, indent=2)}",
     ]
+    if page_generation_rules_text:
+        parts.append(f"\n\n【全局页面生成规范】\n{page_generation_rules_text}")
     if custom_requirements and custom_requirements.strip():
         parts.append(f"\n\n用户自定义要求：\n{custom_requirements.strip()}")
     return "".join(parts)

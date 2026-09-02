@@ -187,6 +187,7 @@ class OpenAILikePageGenerationClient(BasePageGenerationClient):
         model: str | None = None,
         enable_thinking: bool = False,
         check_rules_text: str = "",
+        page_generation_rules_text: str = "",
         custom_requirements: str = "",
     ) -> PagePlanResult:
         if not self.enabled or not api_key.strip():
@@ -198,6 +199,7 @@ class OpenAILikePageGenerationClient(BasePageGenerationClient):
                     api_key=api_key,
                     system_prompt=self.prompt_builder.build_plan_system_prompt(
                         check_rules_text=check_rules_text,
+                        page_generation_rules_text=page_generation_rules_text,
                         custom_requirements=custom_requirements,
                     ),
                     user_prompt=self.prompt_builder.build_plan_user_prompt(
@@ -205,6 +207,7 @@ class OpenAILikePageGenerationClient(BasePageGenerationClient):
                         page_no=page_no,
                         page_name=page_name,
                         svg_content=svg_content,
+                        page_generation_rules_text=page_generation_rules_text,
                         custom_requirements=custom_requirements,
                     ),
                     use_json=True,
@@ -236,6 +239,7 @@ class OpenAILikePageGenerationClient(BasePageGenerationClient):
         model: str | None = None,
         enable_thinking: bool = False,
         check_rules_text: str = "",
+        page_generation_rules_text: str = "",
         custom_requirements: str = "",
     ) -> PageGenerationResult:
         if not self.enabled or not api_key.strip():
@@ -248,6 +252,7 @@ class OpenAILikePageGenerationClient(BasePageGenerationClient):
                     system_prompt=self.prompt_builder.build_generate_system_prompt(
                         page_type,
                         check_rules_text=check_rules_text,
+                        page_generation_rules_text=page_generation_rules_text,
                         custom_requirements=custom_requirements,
                     ),
                     user_prompt=self.prompt_builder.build_generate_user_prompt(
@@ -257,6 +262,7 @@ class OpenAILikePageGenerationClient(BasePageGenerationClient):
                         page_type=page_type,
                         page_title=page_title,
                         svg_content=svg_content,
+                        page_generation_rules_text=page_generation_rules_text,
                         custom_requirements=custom_requirements,
                     ),
                     model=model,
@@ -293,6 +299,7 @@ class OpenAILikePageGenerationClient(BasePageGenerationClient):
         model: str | None = None,
         enable_thinking: bool = False,
         check_rules_text: str = "",
+        page_generation_rules_text: str = "",
         custom_requirements: str = "",
     ) -> PageGenerationResult:
         """生成单张图形 SVG（不依赖模板整页 SVG）。"""
@@ -305,6 +312,7 @@ class OpenAILikePageGenerationClient(BasePageGenerationClient):
                     api_key=api_key,
                     system_prompt=self.prompt_builder.build_diagram_system_prompt(
                         check_rules_text=check_rules_text,
+                        page_generation_rules_text=page_generation_rules_text,
                         custom_requirements=custom_requirements,
                     ),
                     user_prompt=self.prompt_builder.build_diagram_user_prompt(
@@ -312,6 +320,7 @@ class OpenAILikePageGenerationClient(BasePageGenerationClient):
                         page_no=page_no,
                         page_name=page_name,
                         page_title=page_title,
+                        page_generation_rules_text=page_generation_rules_text,
                         custom_requirements=custom_requirements,
                     ),
                     model=model,
@@ -370,6 +379,7 @@ class OpenAILikePageGenerationClient(BasePageGenerationClient):
         model: str | None = None,
         enable_thinking: bool = False,
         check_rules_text: str = "",
+        page_generation_rules_text: str = "",
         custom_requirements: str = "",
     ) -> StructuredPageResult:
         """结构化内容生成：LLM 输出 JSON（文本/表格），不输出 SVG。"""
@@ -387,11 +397,13 @@ class OpenAILikePageGenerationClient(BasePageGenerationClient):
                     api_key=api_key,
                     system_prompt=build_structured_system_prompt(
                         check_rules_text=check_rules_text,
+                        page_generation_rules_text=page_generation_rules_text,
                         custom_requirements=custom_requirements,
                     ),
                     user_prompt=build_structured_user_prompt(
                         requirement_text,
                         page_rule,
+                        page_generation_rules_text=page_generation_rules_text,
                         custom_requirements=custom_requirements,
                     ),
                     use_json=True,

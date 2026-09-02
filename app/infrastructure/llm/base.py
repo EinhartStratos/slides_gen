@@ -40,6 +40,7 @@ class BasePageGenerationClient(ABC):
         model: str | None = None,
         enable_thinking: bool = False,
         check_rules_text: str = "",
+        page_generation_rules_text: str = "",
         custom_requirements: str = "",
     ) -> PagePlanResult:
         raise NotImplementedError
@@ -57,6 +58,7 @@ class BasePageGenerationClient(ABC):
         model: str | None = None,
         enable_thinking: bool = False,
         check_rules_text: str = "",
+        page_generation_rules_text: str = "",
         custom_requirements: str = "",
     ) -> PageGenerationResult:
         raise NotImplementedError
@@ -72,6 +74,7 @@ class BasePageGenerationClient(ABC):
         model: str | None = None,
         enable_thinking: bool = False,
         check_rules_text: str = "",
+        page_generation_rules_text: str = "",
         custom_requirements: str = "",
     ) -> PageGenerationResult:
         raise NotImplementedError
@@ -87,6 +90,7 @@ class BasePageGenerationClient(ABC):
         model: str | None = None,
         enable_thinking: bool = False,
         check_rules_text: str = "",
+        page_generation_rules_text: str = "",
         custom_requirements: str = "",
     ) -> StructuredPageResult:
         raise NotImplementedError

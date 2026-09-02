@@ -35,7 +35,7 @@ from app.core.constants import (
 )
 from app.core.utils import generate_id, json_dumps
 from app.core.config import Settings
-from app.infrastructure.llm.rule_matcher import RuleMatcher
+from app.infrastructure.llm.rule_matcher import PageGenerationRuleMatcher, RuleMatcher
 from app.infrastructure.db.diagram_repository import DiagramRepository
 from app.infrastructure.ppt_master.project_workspace import ProjectWorkspace
 from app.infrastructure.storage.ftp import FtpStorage
@@ -67,6 +67,7 @@ class OrchestrationService:
         pptx_builder_service: PptxBuilderService | None = None,
         hybrid_exporter: HybridPptxExporter | None = None,
         rule_matcher: RuleMatcher | None = None,
+        page_rule_matcher: PageGenerationRuleMatcher | None = None,
         settings: Settings | None = None,
     ) -> None:
         self.workspace = workspace
@@ -80,6 +81,7 @@ class OrchestrationService:
         self.pptx_builder_service = pptx_builder_service
         self.hybrid_exporter = hybrid_exporter
         self.rule_matcher = rule_matcher
+        self.page_rule_matcher = page_rule_matcher
         self.settings = settings
         self._generation_service: Any | None = None
 
@@ -436,6 +438,26 @@ class OrchestrationService:
             if matched_rules:
                 logger.info("第 %s 页匹配到 %d 条检查规则", page_no, len(matched_rules))
 
+        # 匹配该页面的全局页面生成规范
+        planning_rules_text = ""
+        body_rules_text = ""
+        if self.page_rule_matcher is not None:
+            rule_page_name = page_rule.get("page_name", page_name) if page_rule else page_name
+            planning_rules = self.page_rule_matcher.match(
+                page_name=rule_page_name,
+                apply_to="planning",
+                svg_content=svg_content,
+            )
+            body_rules = self.page_rule_matcher.match(
+                page_name=rule_page_name,
+                apply_to="body",
+                svg_content=svg_content,
+            )
+            planning_rules_text = self.page_rule_matcher.format_rules_for_prompt(planning_rules)
+            body_rules_text = self.page_rule_matcher.format_rules_for_prompt(body_rules)
+            if planning_rules or body_rules:
+                logger.info("第 %s 页匹配到 %d 条页面生成规范（planning=%d, body=%d）", page_no, len(planning_rules) + len(body_rules), len(planning_rules), len(body_rules))
+
         page_plan = self.slide_service.plan_single_page(
             api_key=api_key,
             requirement_text=requirement_text,
@@ -446,6 +468,7 @@ class OrchestrationService:
             model=llm_model,
             enable_thinking=llm_enable_thinking,
             check_rules_text=check_rules_text,
+            page_generation_rules_text=planning_rules_text,
             custom_requirements=custom_requirements,
         )
         with lock:
@@ -517,6 +540,7 @@ class OrchestrationService:
                 structured_pages=structured_pages,
                 skipped_pages=skipped_pages,
                 check_rules_text=check_rules_text,
+                page_generation_rules_text=body_rules_text,
                 custom_requirements=custom_requirements,
             )
             return
@@ -526,6 +550,7 @@ class OrchestrationService:
                 api_key, requirement_text, page_no, source_svg, page_plan,
                 model=llm_model, enable_thinking=llm_enable_thinking,
                 check_rules_text=check_rules_text,
+                page_generation_rules_text=body_rules_text,
                 custom_requirements=custom_requirements,
             )
 
@@ -678,6 +703,7 @@ class OrchestrationService:
         structured_pages: dict | None = None,
         skipped_pages: set | None = None,
         check_rules_text: str = "",
+        page_generation_rules_text: str = "",
         custom_requirements: str = "",
     ) -> None:
         """结构化填充路径：LLM 输出 JSON → 保存结果 → 记录到 structured_pages。"""
@@ -691,6 +717,7 @@ class OrchestrationService:
                 model=llm_model,
                 enable_thinking=llm_enable_thinking,
                 check_rules_text=check_rules_text,
+                page_generation_rules_text=page_generation_rules_text,
                 custom_requirements=custom_requirements,
             )
 
@@ -1000,6 +1027,24 @@ class OrchestrationService:
 
         svg_content = source_svg.read_text(encoding="utf-8", errors="ignore")
 
+        # 匹配该图形的全局页面生成规范
+        planning_rules_text = ""
+        diagram_rules_text = ""
+        if self.page_rule_matcher is not None:
+            rule_page_name = page_rule.get("page_name", page_name) if page_rule else page_name
+            planning_rules = self.page_rule_matcher.match(
+                page_name=rule_page_name,
+                apply_to="planning",
+                svg_content=svg_content,
+            )
+            diagram_rules = self.page_rule_matcher.match(
+                page_name=rule_page_name,
+                apply_to="diagram",
+                svg_content=svg_content,
+            )
+            planning_rules_text = self.page_rule_matcher.format_rules_for_prompt(planning_rules)
+            diagram_rules_text = self.page_rule_matcher.format_rules_for_prompt(diagram_rules)
+
         page_plan = self.slide_service.plan_single_page(
             api_key=api_key,
             requirement_text=requirement_text,
@@ -1010,6 +1055,7 @@ class OrchestrationService:
             model=llm_model,
             enable_thinking=llm_enable_thinking,
             check_rules_text=check_rules_text,
+            page_generation_rules_text=planning_rules_text,
             custom_requirements=custom_requirements,
         )
 
@@ -1076,6 +1122,7 @@ class OrchestrationService:
                 model=llm_model,
                 enable_thinking=llm_enable_thinking,
                 check_rules_text=check_rules_text,
+                page_generation_rules_text=diagram_rules_text,
                 custom_requirements=custom_requirements,
             )
 

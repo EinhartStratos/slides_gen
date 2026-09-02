@@ -37,7 +37,7 @@ DIAGRAM_DRAWING_RULES = """
 
 
 class PageAnalysisPromptBuilder:
-    def build_plan_system_prompt(self, check_rules_text: str = "", custom_requirements: str = "") -> str:
+    def build_plan_system_prompt(self, check_rules_text: str = "", page_generation_rules_text: str = "", custom_requirements: str = "") -> str:
         prompt = (
             "你是 PPT 页面规划助手。你的任务是根据需求文本和单页模板 SVG 内容，"
             "判断该页是否需要生成内容，并给出页面类型和标题。\n\n"
@@ -71,6 +71,11 @@ class PageAnalysisPromptBuilder:
                 "\n\n以下是该页面需要遵守的检查规则，规划时请考虑这些规则的要求：\n"
                 f"{check_rules_text}"
             )
+        if page_generation_rules_text:
+            prompt += (
+                "\n\n【全局页面生成规范】命中本章节后必须遵守的正向生成要求（优先级高于检查规则）：\n"
+                f"{page_generation_rules_text}"
+            )
         if custom_requirements and custom_requirements.strip():
             prompt += (
                 "\n\n以下是用户额外提出的自定义要求，规划时必须遵循：\n"
@@ -84,6 +89,7 @@ class PageAnalysisPromptBuilder:
         page_no: int,
         page_name: str,
         svg_content: str,
+        page_generation_rules_text: str = "",
         custom_requirements: str = "",
     ) -> str:
         parts = [
@@ -91,12 +97,14 @@ class PageAnalysisPromptBuilder:
             f"当前是第 {page_no} 页，页面名称：{page_name}\n\n",
             f"该页模板 SVG 内容：\n{svg_content.strip()}\n\n",
         ]
+        if page_generation_rules_text:
+            parts.append(f"本章节必须遵守的生成规范：\n{page_generation_rules_text}\n\n")
         if custom_requirements and custom_requirements.strip():
             parts.append(f"用户自定义要求：\n{custom_requirements.strip()}\n\n")
-        parts.append("请根据需求文本和该页模板内容，判断这一页是否需要生成内容，并给出页面类型和标题。只返回 JSON 对象。")
+        parts.append("请根据需求文本、模板内容和上述生成规范，判断这一页是否需要生成内容，并给出页面类型和标题。只返回 JSON 对象。")
         return "".join(parts)
 
-    def build_generate_system_prompt(self, page_type: str, check_rules_text: str = "", custom_requirements: str = "") -> str:
+    def build_generate_system_prompt(self, page_type: str, check_rules_text: str = "", page_generation_rules_text: str = "", custom_requirements: str = "") -> str:
         common = (
             "你是一个 PPT 页面 SVG 生成助手。你的任务是：根据需求文本和模板页的版面结构，"
             "在模板 SVG 的基础上生成一个完整的 SVG 文件。\n\n"
@@ -129,6 +137,11 @@ class PageAnalysisPromptBuilder:
             common += (
                 "\n\n以下是该页面需要遵守的检查规则，生成内容时必须严格遵循：\n"
                 f"{check_rules_text}"
+            )
+        if page_generation_rules_text:
+            common += (
+                "\n\n【全局页面生成规范】命中本章节后必须遵守的正向生成要求（优先级高于检查规则）：\n"
+                f"{page_generation_rules_text}"
             )
         if custom_requirements and custom_requirements.strip():
             common += (
@@ -187,6 +200,7 @@ class PageAnalysisPromptBuilder:
         page_type: str,
         page_title: str,
         svg_content: str,
+        page_generation_rules_text: str = "",
         custom_requirements: str = "",
     ) -> str:
         parts = [
@@ -196,16 +210,18 @@ class PageAnalysisPromptBuilder:
             f"页面标题：{page_title}\n\n",
             f"模板页 SVG 内容（必须严格保持其版面结构、坐标、颜色、字体样式，只替换文字内容，不要保留占位说明文字）：\n{svg_content.strip()}\n\n",
         ]
+        if page_generation_rules_text:
+            parts.append(f"本章节必须遵守的生成规范：\n{page_generation_rules_text}\n\n")
         if custom_requirements and custom_requirements.strip():
             parts.append(f"用户自定义要求：\n{custom_requirements.strip()}\n\n")
         parts.append(
-            "请根据需求文本的内容，严格保持模板的版面结构、颜色方案和字体样式，"
+            "请根据需求文本的内容和上述生成规范，严格保持模板的版面结构、颜色方案和字体样式，"
             "只将模板中的占位文字和填写说明替换为实际内容，生成一个完整的 SVG。\n"
             "重要提醒：不要重新创造布局，必须复用模板中所有元素的坐标、尺寸、颜色和样式属性。"
         )
         return "".join(parts)
 
-    def build_diagram_system_prompt(self, check_rules_text: str = "", custom_requirements: str = "") -> str:
+    def build_diagram_system_prompt(self, check_rules_text: str = "", page_generation_rules_text: str = "", custom_requirements: str = "") -> str:
         prompt = (
             "你是一个专业的系统架构/产品连接图 SVG 绘制助手。你的任务是根据需求文本，"
             "绘制一张独立的产品连接关系图（只输出图形本身，不输出整页 PPT 模板）。\n\n"
@@ -224,6 +240,11 @@ class PageAnalysisPromptBuilder:
                 "\n\n以下是该页面需要遵守的检查规则，生成图形时必须严格遵循：\n"
                 f"{check_rules_text}"
             )
+        if page_generation_rules_text:
+            prompt += (
+                "\n\n【全局页面生成规范】命中本章节后必须遵守的正向生成要求（优先级高于检查规则）：\n"
+                f"{page_generation_rules_text}"
+            )
         if custom_requirements and custom_requirements.strip():
             prompt += (
                 "\n\n以下是用户额外提出的自定义要求，生成图形时必须遵循：\n"
@@ -237,6 +258,7 @@ class PageAnalysisPromptBuilder:
         page_no: int,
         page_name: str,
         page_title: str,
+        page_generation_rules_text: str = "",
         custom_requirements: str = "",
     ) -> str:
         parts = [
@@ -244,10 +266,12 @@ class PageAnalysisPromptBuilder:
             f"当前是第 {page_no} 页，页面名称：{page_name}\n",
             f"页面标题：{page_title}\n\n",
         ]
+        if page_generation_rules_text:
+            parts.append(f"本章节必须遵守的生成规范：\n{page_generation_rules_text}\n\n")
         if custom_requirements and custom_requirements.strip():
             parts.append(f"用户自定义要求：\n{custom_requirements.strip()}\n\n")
         parts.append(
-            "请根据需求文本中的产品列表和接口关系，绘制一张产品连接关系图。\n"
+            "请根据需求文本中的产品列表、接口关系和上述生成规范，绘制一张产品连接关系图。\n"
             "只返回完整 SVG 代码，不要返回任何解释、markdown、代码块或整页 PPT 模板。"
         )
         return "".join(parts)
