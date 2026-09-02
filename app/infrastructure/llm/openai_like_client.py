@@ -157,11 +157,14 @@ class OpenAILikePageGenerationClient(BasePageGenerationClient):
                             break
                         try:
                             chunk = json.loads(data_str)
-                            delta = chunk.get("choices", [{}])[0].get("delta", {})
+                            choices = chunk.get("choices") or [{}]
+                            if not choices:
+                                continue
+                            delta = choices[0].get("delta", {})
                             text = delta.get("content")
                             if text:
                                 content_parts.append(text)
-                        except json.JSONDecodeError:
+                        except (json.JSONDecodeError, IndexError, AttributeError):
                             logger.debug("跳过无法解析的 SSE 行: %s", data_str[:80])
         return "".join(content_parts)
 
