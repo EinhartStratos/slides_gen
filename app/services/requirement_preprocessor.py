@@ -10,6 +10,8 @@
 from __future__ import annotations
 
 import asyncio
+import csv
+import io
 import json
 import logging
 from dataclasses import dataclass, field
@@ -93,11 +95,12 @@ _EXTRACT_TASKS: list[_ExtractTask] = [
         name="requirement_items",
         chunk_keys=["workload", "function_points"],
         system_prompt=(
-            "你正在从工作量估算表和功能点估算表中提取需求项清单。"
+            "你正在从需求说明书和工作量/功能点表中提取需求项清单。"
             "xlsx 文本格式是：每个 sheet 以 'sheet-name: 名称\\nCSV content:\\n' 开头，后面是逗号分隔的表格行。"
-            "请从工作量表的'需求项'列识别所有不同的需求项，从功能点表的'需求项/功能名称/功能描述'列补充主要处理流程和要点。"
-            "必须输出 JSON 数组（最外层是 []），每个元素对应一个需求项，包含：编号、名称、类型（功能类/流程类/数据类/非功能）、改造产品（数组）、配合测试产品（数组）、主要处理流程/要点。"
-            "不要输出单个对象，不要输出 Markdown 代码块。"
+            "请优先从工作量表的'需求项'列识别所有不同的需求项（按名称去重），从功能点表的'功能项编号/需求项/功能名称/功能描述'列补充每个需求项的主要处理流程和要点。"
+            "必须输出 JSON 数组（最外层是 []），数组中包含多个对象，每个对象对应一个需求项。"
+            "每个需求项包含：编号、名称、类型（功能类/流程类/数据类/非功能）、改造产品（数组）、配合测试产品（数组）、主要处理流程/要点。"
+            "不要只输出一个对象，不要输出 Markdown 代码块。"
         ),
         is_json=True,
         result_key="requirement_items",
@@ -294,6 +297,7 @@ class RequirementPreprocessor:
         tasks = [_run_one(task) for task in _EXTRACT_TASKS]
         results = await asyncio.gather(*tasks)
         data = self._merge_results(results)
+        self._apply_table_fallbacks(data, chunks)
         return self._format_extracted(data)
 
     def _join_chunks(self, chunks: dict[str, str], keys: list[str]) -> str:
@@ -384,12 +388,266 @@ class RequirementPreprocessor:
         return data
 
     @staticmethod
+    def _extract_workload_csv(workload_text: str) -> str:
+        """从 workload chunk 中取出'工作量明细' sheet 的 CSV 内容。"""
+        for part in workload_text.split("sheet-name:"):
+            part = part.strip()
+            if not part or "\nCSV content:\n" not in part:
+                continue
+            name, csv_text = part.split("\nCSV content:\n", 1)
+            if "工作量" in name:
+                return csv_text
+        return workload_text
+
+    @staticmethod
+    def _build_product_matrix_from_workload(workload_text: str) -> list[dict[str, Any]] | None:
+        """从工作量明细表中解析产品清单（LLM 失败时的兜底）。"""
+        csv_text = RequirementPreprocessor._extract_workload_csv(workload_text)
+        if not csv_text.strip():
+            return None
+
+        try:
+            reader = csv.reader(io.StringIO(csv_text))
+            header: list[str] | None = None
+            rows: list[list[str]] = []
+            for row in reader:
+                if not row:
+                    continue
+                if row[0].strip() == "序号" and "需求项" in row:
+                    header = row
+                    continue
+                if header is None:
+                    continue
+                if row[0].strip() in ("", "说明(此行勿删)", "示例(此行勿删)"):
+                    continue
+                if len(row) < 33:
+                    continue
+                rows.append(row)
+
+            if not header:
+                return None
+
+            def col(name: str) -> int:
+                return header.index(name) if name in header else -1
+
+            idx_en = col("产品英文")
+            idx_cn = col("产品中文")
+            idx_type = col("版本情况")
+            idx_req = col("需求项")
+            idx_total = col("合计（人天）")
+
+            # 表头可能把'产品工作量小计'合并，子列在第二行
+            if idx_total < 0:
+                try:
+                    idx_total = header.index("产品工作量小计") + 3
+                except ValueError:
+                    idx_total = -1
+
+            if idx_en < 0 or idx_cn < 0 or idx_type < 0:
+                return None
+
+            products: dict[str, dict[str, Any]] = {}
+            for row in rows:
+                en = row[idx_en].strip()
+                cn = row[idx_cn].strip()
+                if not en or not cn:
+                    continue
+                req = row[idx_req].strip() if idx_req >= 0 else ""
+                status = row[idx_type].strip()
+                kind = "仅配合测试" if status == "仅配合测试" else "改造"
+
+                total = 0
+                if idx_total >= 0 and len(row) > idx_total:
+                    try:
+                        total = int(float(row[idx_total].strip() or "0"))
+                    except ValueError:
+                        total = 0
+
+                if en not in products:
+                    products[en] = {
+                        "产品英文": en,
+                        "产品中文": cn,
+                        "实施类型": kind,
+                        "涉及需求项": [],
+                        "功能改造要点": [],
+                        "非功能改造要点": [],
+                        "数据需求改造要求": [],
+                        "工作量（人天）": 0,
+                    }
+
+                if status == "仅配合测试":
+                    if kind != products[en]["实施类型"]:
+                        products[en]["实施类型"] = kind
+                else:
+                    products[en]["实施类型"] = "改造"
+
+                if req and req not in products[en]["涉及需求项"]:
+                    products[en]["涉及需求项"].append(req)
+                    products[en]["功能改造要点"].append(req)
+
+                products[en]["工作量（人天）"] += total
+
+            return list(products.values())
+        except Exception as exc:
+            logger.warning("解析产品清单失败: %s", exc)
+            return None
+
+    @staticmethod
+    def _extract_function_points_csv(function_points_text: str) -> str:
+        """从 function_points chunk 中取出包含功能点明细的 sheet CSV。"""
+        for part in function_points_text.split("sheet-name:"):
+            part = part.strip()
+            if not part or "\nCSV content:\n" not in part:
+                continue
+            name, csv_text = part.split("\nCSV content:\n", 1)
+            first_lines = "\n".join(csv_text.splitlines()[:8])
+            if "功能项编号" in first_lines:
+                return csv_text
+        return ""
+
+    @staticmethod
+    def _build_function_points_map(function_points_text: str) -> dict[str, list[str]]:
+        """从功能点明细表建立 需求项 -> 功能名称列表 的映射。"""
+        csv_text = RequirementPreprocessor._extract_function_points_csv(function_points_text)
+        if not csv_text:
+            return {}
+
+        result: dict[str, list[str]] = {}
+        try:
+            reader = csv.reader(io.StringIO(csv_text))
+            header: list[str] | None = None
+            for row in reader:
+                if not row:
+                    continue
+                if row[0].strip() == "功能项编号" and "需求项" in row:
+                    header = row
+                    continue
+                if header is None:
+                    continue
+                if len(row) < 5:
+                    continue
+                if row[0].strip() in ("", "功能项编号"):
+                    continue
+
+                idx_req = header.index("需求项")
+                idx_name = header.index("功能名称")
+                idx_desc = header.index("功能描述")
+
+                req = row[idx_req].strip()
+                if not req:
+                    continue
+                name = row[idx_name].strip()
+                desc = row[idx_desc].strip() if idx_desc >= 0 else ""
+                text = f"{name}：{desc}" if desc and desc != name else name
+                if text and text not in result.get(req, []):
+                    result.setdefault(req, []).append(text)
+        except Exception as exc:
+            logger.warning("解析功能点明细失败: %s", exc)
+        return result
+
+    @staticmethod
+    def _build_requirement_items_from_workload(
+        workload_text: str,
+        function_points_text: str = "",
+    ) -> list[dict[str, Any]] | None:
+        """从工作量明细表中解析需求项清单，并用功能点明细补充要点。"""
+        csv_text = RequirementPreprocessor._extract_workload_csv(workload_text)
+        if not csv_text.strip():
+            return None
+
+        fp_map = RequirementPreprocessor._build_function_points_map(function_points_text)
+
+        try:
+            reader = csv.reader(io.StringIO(csv_text))
+            header: list[str] | None = None
+            rows: list[list[str]] = []
+            for row in reader:
+                if not row:
+                    continue
+                if row[0].strip() == "序号" and "需求项" in row:
+                    header = row
+                    continue
+                if header is None:
+                    continue
+                if row[0].strip() in ("", "说明(此行勿删)", "示例(此行勿删)"):
+                    continue
+                if len(row) < 10:
+                    continue
+                rows.append(row)
+
+            if not header:
+                return None
+
+            idx_req = header.index("需求项")
+            idx_id = header.index("需求编号")
+            idx_en = header.index("产品英文")
+            idx_cn = header.index("产品中文")
+            idx_type = header.index("版本情况")
+
+            items: dict[str, dict[str, Any]] = {}
+            for row in rows:
+                req = row[idx_req].strip()
+                if not req:
+                    continue
+                if req not in items:
+                    code = row[idx_id].strip()
+                    points = fp_map.get(req, [])[:8]
+                    items[req] = {
+                        "编号": code,
+                        "名称": req,
+                        "类型": req.split("(")[-1].rstrip(")") if "(" in req else "功能类",
+                        "改造产品": [],
+                        "配合测试产品": [],
+                        "主要处理流程/要点": "；".join(points),
+                    }
+                en = row[idx_en].strip()
+                cn = row[idx_cn].strip()
+                status = row[idx_type].strip()
+                if status == "仅配合测试":
+                    if en and en not in items[req]["配合测试产品"]:
+                        items[req]["配合测试产品"].append(en)
+                else:
+                    if en and en not in items[req]["改造产品"]:
+                        items[req]["改造产品"].append(en)
+
+            return list(items.values())
+        except Exception as exc:
+            logger.warning("解析需求项清单失败: %s", exc)
+            return None
+
+    def _apply_table_fallbacks(self, data: dict[str, Any], chunks: dict[str, str]) -> None:
+        """LLM 返回的表格类结果不完整时，用 xlsx 表解析兜底。"""
+        workload = chunks.get("workload", "")
+        if not workload:
+            return
+
+        existing_matrix = data.get("产品清单")
+        existing_matrix_len = len(existing_matrix) if isinstance(existing_matrix, list) else 0
+        matrix = self._build_product_matrix_from_workload(workload)
+        if matrix and len(matrix) > existing_matrix_len:
+            data["产品清单"] = matrix
+
+        existing_items = data.get("需求项清单")
+        existing_items_len = len(existing_items) if isinstance(existing_items, list) else 0
+        fp_text = chunks.get("function_points", "")
+        items = self._build_requirement_items_from_workload(workload, fp_text)
+        if items and len(items) > existing_items_len:
+            data["需求项清单"] = items
+
+    @staticmethod
     def _format_extracted(data: dict[str, Any]) -> str:
         """把合并后的结构化数据转成格式化文本。"""
         lines: list[str] = []
 
-        def put(title: str, value: Any) -> None:
+        def is_empty_like(value: Any) -> bool:
             if value is None:
+                return True
+            if isinstance(value, str):
+                return value.strip() in ("", "空字符串", "(空)", "（空）", "null", "none", "无", "空")
+            return False
+
+        def put(title: str, value: Any) -> None:
+            if is_empty_like(value):
                 return
             if isinstance(value, (list, dict)):
                 value = json.dumps(value, ensure_ascii=False)
