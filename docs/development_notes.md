@@ -71,7 +71,7 @@ app/
 │  ├─ diagram_generation_service.py  # 【待实现】一图一个SVG
 │  └─ composition_service.py         # 【待实现】局部插图与续页
 └─ config/
-   └─ page_generation_rules.json     # 【待实现】全局标题关键词生成规范
+   └─ page_generation_rules.json     # 【已落地】全局标题关键词生成规范
 ```
 
 ## 2. 核心生成链路
@@ -207,7 +207,7 @@ GenerationRequest (generation_id)
 
 创建任务时可通过 `custom_requirements` 字段传入用户自定义的额外要求。该字段随 `request_payload_json` 持久化到数据库，运行时注入到每页的规划和生成提示词中（system prompt 和 user prompt）。
 
-### 4.4 全局页面生成规范【待实现】
+### 4.4 全局页面生成规范【已落地】
 
 `app/config/page_generation_rules.json` 按模板固定章节标题匹配正向生成规范，不提供在线维护接口。优先级由低到高：模板要求 → `check_rules.json` → `page_generation_rules.json` → `custom_requirements`；防编造始终是不可覆盖的硬规则。
 

@@ -136,3 +136,96 @@ class TestDiagramPrompt:
         assert "产品连接关系图" in prompt
         assert "画架构图" in prompt
         assert "只返回完整 SVG" in prompt
+
+
+class TestPageGenerationRuleMatcher:
+    """全局页面生成规范匹配器测试"""
+
+    def test_match_cover_and_format(self):
+        from app.infrastructure.llm.rule_matcher import PageGenerationRuleMatcher
+
+        rules = [
+            {
+                "id": "global_page_rule_001",
+                "enabled": True,
+                "template_scope": ["*"],
+                "title_match": {
+                    "mode": "any_contains",
+                    "keywords": ["封面"],
+                    "normalize_whitespace": True,
+                    "ignore_suffixes": ["（续）", "(续)"],
+                },
+                "apply_to": ["planning", "body"],
+                "instruction": "封面必须生成。",
+                "priority": 100,
+            },
+            {
+                "id": "global_page_rule_002",
+                "enabled": True,
+                "template_scope": ["*"],
+                "title_match": {
+                    "mode": "any_contains",
+                    "keywords": ["需求背景"],
+                    "normalize_whitespace": True,
+                    "ignore_suffixes": ["（续）", "(续)"],
+                },
+                "apply_to": ["body"],
+                "instruction": "从需求背景中提炼。",
+                "priority": 70,
+            },
+        ]
+        matcher = PageGenerationRuleMatcher(rules)
+        matched = matcher.match("项目封面", "planning")
+        assert len(matched) == 1
+        assert matched[0]["id"] == "global_page_rule_001"
+
+    def test_match_respects_apply_to(self):
+        from app.infrastructure.llm.rule_matcher import PageGenerationRuleMatcher
+
+        rules = [
+            {
+                "id": "rule_001",
+                "enabled": True,
+                "title_match": {"mode": "any_contains", "keywords": ["需求背景"], "normalize_whitespace": True, "ignore_suffixes": []},
+                "apply_to": ["body"],
+                "instruction": "body only",
+                "priority": 70,
+            }
+        ]
+        matcher = PageGenerationRuleMatcher(rules)
+        assert len(matcher.match("需求背景", "planning")) == 0
+        assert len(matcher.match("需求背景", "body")) == 1
+
+    def test_format_rules_for_prompt(self):
+        from app.infrastructure.llm.rule_matcher import PageGenerationRuleMatcher
+
+        matcher = PageGenerationRuleMatcher([
+            {"id": "rule_001", "enabled": True, "instruction": "不要编造", "priority": 1000, "apply_to": ["body"], "title_match": {"keywords": [], "ignore_suffixes": []}}
+        ])
+        text = matcher.format_rules_for_prompt(matcher.match("任意", "body"))
+        assert "rule_001" in text
+        assert "不要编造" in text
+
+
+class TestPageRulesInPrompt:
+    """验证全局页面生成规范正确注入 Prompt"""
+
+    def test_plan_system_prompt_contains_page_rules(self):
+        builder = PageAnalysisPromptBuilder()
+        prompt = builder.build_plan_system_prompt(page_generation_rules_text="封面必须生成。")
+        assert "全局页面生成规范" in prompt
+        assert "封面必须生成" in prompt
+
+    def test_generate_user_prompt_contains_page_rules(self):
+        builder = PageAnalysisPromptBuilder()
+        prompt = builder.build_generate_user_prompt(
+            requirement_text="需求",
+            page_no=2,
+            page_name="需求背景",
+            page_type="content",
+            page_title="背景",
+            svg_content="<svg/>",
+            page_generation_rules_text="从需求背景中提炼。",
+        )
+        assert "本章节必须遵守的生成规范" in prompt
+        assert "从需求背景中提炼" in prompt

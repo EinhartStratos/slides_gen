@@ -204,12 +204,20 @@ class PageGenerationRuleMatcher:
         return all_matched
 
     def format_rules_for_prompt(self, rules: list[dict[str, Any]]) -> str:
-        """将匹配到的全局生成规范格式化为提示词文本。"""
+        """将匹配到的全局生成规范格式化为提示词文本。
+
+        如果规则包含 example 字段，会作为该章节的 few-shot 示例追加。
+        """
         if not rules:
             return ""
         lines: list[str] = []
         for rule in rules:
             instruction = rule.get("instruction", "")
-            if instruction:
-                lines.append(f"- [{rule.get('id', '')}] {instruction}")
+            if not instruction:
+                continue
+            rule_id = rule.get("id", "")
+            lines.append(f"- [{rule_id}] {instruction}")
+            example = rule.get("example", "")
+            if example:
+                lines.append(f"  【{rule_id} 示例输出】：\n{example}")
         return "\n".join(lines)

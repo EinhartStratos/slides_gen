@@ -47,6 +47,7 @@ from app.schemas.structured_generation import StructuredPageResult
 from app.services.svg_validation_service import SvgValidationService
 from app.services.task_service import TaskService
 from app.services.template_service import TemplateService
+from app.services.requirement_preprocessor import RequirementPreprocessor
 from app.schemas.structured_generation import StructuredPageResult
 
 
@@ -96,8 +97,29 @@ class OrchestrationService:
         except Exception as exc:
             logger.warning("通知 Generation 聚合状态失败: %s", exc)
 
+    async def _preprocess_requirement(self, api_key: str, raw_text: str) -> str:
+        """对 requirement_text 做结构化预处理，失败则返回原文。"""
+        try:
+            client = getattr(self.slide_service, "generation_client", None)
+            if not client or not client.enabled or not api_key:
+                return raw_text
+            preprocessor = RequirementPreprocessor(
+                llm_client=client,
+                api_key=api_key,
+                max_input_chars=40000,
+                max_concurrency=2,
+            )
+            processed = await preprocessor.preprocess(raw_text)
+            return processed.formatted_text
+        except Exception as exc:
+            logger.warning("requirement 预处理失败，使用原文: %s", exc)
+            return raw_text
+
     async def run_task(self, api_key: str, task_id: str) -> None:
         task = self.task_service.get_task(api_key, task_id)
+        raw_text = str(task.get("requirement_text") or "")
+        if raw_text.strip():
+            task["requirement_text"] = await self._preprocess_requirement(api_key, raw_text)
         task_type = task.get("task_type") or "legacy"
 
         if task_type == TASK_TYPE_BODY:

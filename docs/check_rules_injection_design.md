@@ -2,7 +2,7 @@
 
 > 文档版本：v4 补充，更新日期：2026-09-01
 >
-> **状态说明**：`check_rules.json` 与 RuleMatcher 已实现；`page_generation_rules.json` 是分离生成模式的新增全局生成规范，已确认但尚待实现。两类规则不得混为一个文件。
+> **状态说明**：`check_rules.json` 与 RuleMatcher 已实现；`page_generation_rules.json` 是分离生成模式的新增全局生成规范，已落地。两类规则不得混为一个文件。
 
 ## 一、背景
 
@@ -332,7 +332,7 @@ JSON 结构和字段见 [分离生成计划第9节](ppt_body_diagram_separated_g
 
 1. 模板填写要求；
 2. 已实现的 `check_rules.json` 自动检查规则；
-3. **【待实现】`page_generation_rules.json` 全局标题关键词生成规范**；
+3. **【已落地】`page_generation_rules.json` 全局标题关键词生成规范**；
 4. 当前请求 `custom_requirements`。
 
 防编造是不可覆盖的硬规则：任何层级都不能要求模型填写 `requirement_text` 中不存在的业务事实。
