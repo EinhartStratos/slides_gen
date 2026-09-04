@@ -424,20 +424,61 @@ class GenerationService:
         if generation is None:
             return
 
-        statuses = []
-        for field, task_id in [
+        # 1. 先同步各子任务状态到 generation 记录
+        child_fields = [
             ("body_status", generation.get("body_task_id")),
             ("diagram_status", generation.get("diagram_task_id")),
             ("compose_status", generation.get("compose_task_id")),
-        ]:
+        ]
+        for field, task_id in child_fields:
             if task_id:
                 task = self.task_repository.get_task(task_id)
                 if task:
                     self.generation_repository.update(generation_id, {field: task["status"]})
-                    if task["status"] not in {TASK_STATUS_PENDING, CHILD_STATUS_NOT_REQUESTED}:
-                        statuses.append(task["status"])
 
-        # 聚合状态判定
+        # 2. 自动组装：body 和 diagrams 都完成后创建 compose 任务
+        generation = self.generation_repository.get(generation_id)
+        if generation.get("auto_compose"):
+            body_status = generation.get("body_status")
+            diagram_status = generation.get("diagram_status")
+            if (
+                body_status in {TASK_STATUS_COMPLETED, "completed_with_warnings"}
+                and diagram_status in {TASK_STATUS_COMPLETED, "completed_with_warnings"}
+                and not generation.get("compose_task_id")
+            ):
+                template = self.template_service.get_template(str(generation["template_id"]))
+                generation_workspace = self.workspace.generation(generation_id)
+                remote_root = self.ftp.join(self.ftp.settings.ftp_root_dir, "generations", generation_id)
+                compose_task_id = self._create_child_task(
+                    api_key=generation["api_key"],
+                    generation_id=generation_id,
+                    task_type=TASK_TYPE_COMPOSE,
+                    template=template,
+                    requirement_text=generation["requirement_text"],
+                    custom_requirements=generation.get("custom_requirements"),
+                    options=None,
+                    ftp_root=remote_root,
+                    generation_workspace=generation_workspace,
+                )
+                self.generation_repository.update(
+                    generation_id,
+                    {"compose_task_id": compose_task_id, "compose_status": TASK_STATUS_PENDING},
+                )
+                self.task_runner.submit(
+                    compose_task_id,
+                    lambda: self.orchestration_service.run_task(generation["api_key"], compose_task_id),
+                )
+
+        # 3. 重新读取并计算最终聚合状态
+        # 注意：自动组装后 compose_status 为 pending，不能直接把整体标为 completed
+        generation = self.generation_repository.get(generation_id)
+        statuses: list[str] = []
+        for _field, task_id in child_fields:
+            if task_id:
+                task = self.task_repository.get_task(task_id)
+                if task and task["status"] not in {TASK_STATUS_PENDING, CHILD_STATUS_NOT_REQUESTED}:
+                    statuses.append(task["status"])
+
         if any(s == TASK_STATUS_RUNNING for s in statuses):
             overall = GENERATION_STATUS_RUNNING
         elif any(s == TASK_STATUS_FAILED for s in statuses) and not any(
@@ -455,36 +496,3 @@ class GenerationService:
         if overall in {GENERATION_STATUS_COMPLETED, GENERATION_STATUS_COMPLETED_WITH_WARNINGS, GENERATION_STATUS_FAILED}:
             fields["completed_at"] = datetime.now()
         self.generation_repository.update(generation_id, fields)
-
-        # 自动组装逻辑：body 和 diagrams 都完成后触发
-        if generation.get("auto_compose"):
-            fresh = self.generation_repository.get(generation_id)
-            body_status = fresh.get("body_status")
-            diagram_status = fresh.get("diagram_status")
-            if (
-                body_status in {TASK_STATUS_COMPLETED, "completed_with_warnings"}
-                and diagram_status in {TASK_STATUS_COMPLETED, "completed_with_warnings"}
-                and not fresh.get("compose_task_id")
-            ):
-                template = self.template_service.get_template(str(fresh["template_id"]))
-                generation_workspace = self.workspace.generation(generation_id)
-                remote_root = self.ftp.join(self.ftp.settings.ftp_root_dir, "generations", generation_id)
-                compose_task_id = self._create_child_task(
-                    api_key=fresh["api_key"],
-                    generation_id=generation_id,
-                    task_type=TASK_TYPE_COMPOSE,
-                    template=template,
-                    requirement_text=fresh["requirement_text"],
-                    custom_requirements=fresh.get("custom_requirements"),
-                    options=None,
-                    ftp_root=remote_root,
-                    generation_workspace=generation_workspace,
-                )
-                self.generation_repository.update(
-                    generation_id,
-                    {"compose_task_id": compose_task_id, "compose_status": TASK_STATUS_PENDING},
-                )
-                self.task_runner.submit(
-                    compose_task_id,
-                    lambda: self.orchestration_service.run_task(fresh["api_key"], compose_task_id),
-                )

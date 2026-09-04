@@ -246,6 +246,9 @@ def test_settings(tmp_path):
         from pptx import Presentation
         Presentation().save(str(template_file))
 
+    page_rules_file = tmp_path / "page_generation_rules.json"
+    page_rules_file.write_text("[]", encoding="utf-8")
+
     return Settings(
         app_name="test_slides_gen",
         app_env="test",
@@ -280,7 +283,7 @@ def test_settings(tmp_path):
         logo_right_start_ratio=0.75,
         logo_top_end_ratio=0.20,
         logo_max_area_ratio=0.05,
-        page_generation_rules_file=tmp_path / "page_generation_rules.json",
+        page_generation_rules_file=page_rules_file,
     )
 
 
@@ -366,6 +369,21 @@ class MockPageGenerationClient:
     @property
     def enabled(self) -> bool:
         return True
+
+    def _call_llm(
+        self,
+        api_key: str,
+        system_prompt: str,
+        user_prompt: str,
+        use_json: bool = False,
+        stream: bool = True,
+        model: str | None = None,
+        enable_thinking: bool = False,
+    ) -> str:
+        """模拟原始 LLM 调用，RequirementPreprocessor 等组件可能直接使用。"""
+        if use_json:
+            return "{}"
+        return "Mock LLM response"
 
     def _diagram_svg(self) -> str:
         return (
