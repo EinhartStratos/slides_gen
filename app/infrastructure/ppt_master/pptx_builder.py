@@ -14,9 +14,18 @@ import re
 
 from pptx import Presentation
 from pptx.enum.text import MSO_ANCHOR, PP_ALIGN
+from pptx.oxml.ns import qn
 from pptx.slide import Slide
 from pptx.util import Pt
 
+from app.core.constants import (
+    BODY_TEXT_FONT_NAME,
+    BODY_TEXT_FONT_SIZE_PT,
+    BODY_TEXT_LINE_SPACING,
+    TABLE_TEXT_FONT_NAME,
+    TABLE_TEXT_FONT_SIZE_PT,
+    TABLE_TEXT_LINE_SPACING,
+)
 from app.schemas.structured_generation import GeneratedElement, StructuredPageResult
 
 
@@ -111,7 +120,11 @@ class PPTBuilder:
             result_element = result_element_map.get(element_id)
             if rule["type"] in {"title", "text"}:
                 if shape is not None and hasattr(shape, "text_frame"):
-                    self._set_text(shape, (result_element.content if result_element is not None else "") or "")
+                    self._set_text(
+                        shape,
+                        (result_element.content if result_element is not None else "") or "",
+                        is_body=rule["type"] == "text",
+                    )
             elif rule["type"] == "table":
                 if shape is not None and getattr(shape, "has_table", False):
                     if result_element is None or not ((result_element.headers or []) or (result_element.rows or [])):
@@ -493,7 +506,7 @@ class PPTBuilder:
                 if parent is not None:
                     parent.remove(node)
 
-    def _set_text(self, shape, content: str) -> None:
+    def _set_text(self, shape, content: str, *, is_body: bool = False) -> None:
         text_frame = shape.text_frame
         paragraph_alignment = None
         font_name = None
@@ -512,12 +525,57 @@ class PPTBuilder:
         paragraph = text_frame.paragraphs[0]
         paragraph.text = content
         paragraph.alignment = paragraph_alignment
-        if paragraph.runs:
+        if is_body:
+            # 正文不跟随模板提示文字样式：固定字体/字号/行距
+            paragraph.line_spacing = BODY_TEXT_LINE_SPACING
+            for run in paragraph.runs:
+                self._apply_fixed_run_font(
+                    run,
+                    name=BODY_TEXT_FONT_NAME,
+                    size_pt=BODY_TEXT_FONT_SIZE_PT,
+                    bold=False,
+                    italic=False,
+                )
+        elif paragraph.runs:
             font = paragraph.runs[0].font
             font.name = font_name
             font.size = font_size
             font.bold = bold
             font.italic = italic
+
+    @staticmethod
+    def _apply_fixed_run_font(
+        run,
+        *,
+        name: str,
+        size_pt: float,
+        bold: bool | None = None,
+        italic: bool | None = None,
+    ) -> None:
+        """强制设置 run 的字体/字号，并同步东亚字体（a:ea）。
+
+        仅设置 font.name 只会写 a:latin，中文会回落到主题字体，
+        因此需要在 rPr 中补充 <a:ea typeface="..."/>。
+        """
+        font = run.font
+        font.name = name
+        font.size = Pt(size_pt)
+        if bold is not None:
+            font.bold = bold
+        if italic is not None:
+            font.italic = italic
+        rPr = run._r.get_or_add_rPr()
+        ea = rPr.find(qn("a:ea"))
+        if ea is None:
+            ea = rPr.makeelement(qn("a:ea"), {})
+            latin = rPr.find(qn("a:latin"))
+            if latin is not None:
+                latin.addnext(ea)
+            else:
+                rPr.insert_element_before(
+                    ea, "a:cs", "a:sym", "a:hlinkClick", "a:hlinkMouseOver", "a:rtl", "a:extLst"
+                )
+        ea.set("typeface", name)
 
     def _fill_table(self, shape, rule: dict, element: GeneratedElement) -> None:
         table = shape.table
@@ -574,14 +632,20 @@ class PPTBuilder:
         cell.vertical_anchor = self._to_vertical_anchor(style.get("vertical_anchor"))
         text_frame = cell.text_frame
         text_frame.word_wrap = True
-        paragraph = text_frame.paragraphs[0] if text_frame.paragraphs else text_frame.add_paragraph()
-        paragraph.alignment = self._to_paragraph_alignment(style.get("alignment"))
-        if paragraph.runs:
-            font = paragraph.runs[0].font
-            font.name = style.get("font_name") or "微软雅黑"
-            font.size = Pt((style.get("font_size") or 1400) / 100)
-            font.bold = bool(style.get("bold", False))
-            font.italic = bool(style.get("italic", False))
+        bold = bool(style.get("bold", False))
+        italic = bool(style.get("italic", False))
+        for paragraph in text_frame.paragraphs:
+            paragraph.alignment = self._to_paragraph_alignment(style.get("alignment"))
+            # 表格正文不跟随模板提示文字样式：固定字体/字号/行距
+            paragraph.line_spacing = TABLE_TEXT_LINE_SPACING
+            for run in paragraph.runs:
+                self._apply_fixed_run_font(
+                    run,
+                    name=TABLE_TEXT_FONT_NAME,
+                    size_pt=TABLE_TEXT_FONT_SIZE_PT,
+                    bold=bold,
+                    italic=italic,
+                )
 
     def _to_paragraph_alignment(self, alignment: str | None):
         mapping = {
