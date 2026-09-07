@@ -343,10 +343,19 @@ class OrchestrationService:
                 file_size_bytes=result_pptx_path.stat().st_size,
                 content_type="application/vnd.openxmlformats-officedocument.presentationml.presentation",
             )
+            # 有页面失败或全部跳过时，标记为 completed_with_warnings 而非 completed
+            final_status = TASK_STATUS_COMPLETED
+            warning_msg = None
+            if failed_pages > 0 or (completed_pages == 0 and skipped_count > 0):
+                final_status = "completed_with_warnings"
+                warning_msg = (
+                    f"任务完成但存在异常：完成 {completed_pages} 页，"
+                    f"跳过 {skipped_count} 页，失败 {failed_pages} 页"
+                )
             self.task_service.repository.update_task(
                 task_id,
                 {
-                    "status": TASK_STATUS_COMPLETED,
+                    "status": final_status,
                     "current_stage": "completed",
                     "progress": 100,
                     "ftp_validation_report_path": ftp_validation_report_path,
@@ -356,11 +365,14 @@ class OrchestrationService:
                     "skipped_pages": skipped_count,
                     "failed_pages": failed_pages,
                     "completed_at": datetime.now(),
-                    "error_message": None,
+                    "error_message": warning_msg,
                     "error_code": None,
                 },
             )
-            self.task_service.create_event(task_id, api_key, "exported", "completed", "最终 PPTX 已导出")
+            self.task_service.create_event(
+                task_id, api_key, "exported", "completed",
+                warning_msg or "最终 PPTX 已导出",
+            )
         except Exception as exc:
             logger.error("任务执行失败: %s", exc, exc_info=True)
             self.task_service.repository.update_task(
@@ -1389,7 +1401,11 @@ class OrchestrationService:
             if body_task["status"] not in {TASK_STATUS_COMPLETED, "completed_with_warnings"}:
                 raise ValueError("正文任务尚未完成")
             if diagram_task["status"] not in {TASK_STATUS_COMPLETED, "completed_with_warnings"}:
-                raise ValueError("图形任务尚未完成")
+                # 图形任务失败不阻塞组装：退化为纯正文组装
+                logger.warning(
+                    "图形任务状态为 %s，组装将不包含任何图形",
+                    diagram_task["status"],
+                )
 
             self.task_service.repository.update_task(task_id, {"current_stage": "composing", "progress": 10})
 

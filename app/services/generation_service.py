@@ -13,11 +13,14 @@ from app.core.constants import (
     GENERATION_STATUS_FAILED,
     GENERATION_STATUS_PENDING,
     GENERATION_STATUS_RUNNING,
+    CHILD_STATUS_WAITING,
+    TASK_STATUS_CANCELLED,
     TASK_STATUS_COMPLETED,
     TASK_STATUS_FAILED,
     TASK_STATUS_PENDING,
     TASK_STATUS_RESUMING,
     TASK_STATUS_RUNNING,
+    TASK_STATUS_STOPPED,
     TASK_TYPE_BODY,
     TASK_TYPE_COMPOSE,
     TASK_TYPE_DIAGRAMS,
@@ -462,16 +465,27 @@ class GenerationService:
                 if task:
                     self.generation_repository.update(generation_id, {field: task["status"]})
 
-        # 2. 自动组装：body 和 diagrams 都完成后创建 compose 任务
+        # 2. 自动组装：body 和 diagrams 都到达终态后决定
         generation = self.generation_repository.get(generation_id)
-        if generation.get("auto_compose"):
+        if generation.get("auto_compose") and not generation.get("compose_task_id"):
             body_status = generation.get("body_status")
             diagram_status = generation.get("diagram_status")
-            if (
-                body_status in {TASK_STATUS_COMPLETED, "completed_with_warnings"}
-                and diagram_status in {TASK_STATUS_COMPLETED, "completed_with_warnings"}
-                and not generation.get("compose_task_id")
-            ):
+            terminal_states = {
+                TASK_STATUS_COMPLETED,
+                "completed_with_warnings",
+                TASK_STATUS_FAILED,
+                TASK_STATUS_CANCELLED,
+                TASK_STATUS_STOPPED,
+            }
+            both_terminal = (
+                body_status in terminal_states
+                and diagram_status in terminal_states
+            )
+            if both_terminal and body_status in {
+                TASK_STATUS_COMPLETED,
+                "completed_with_warnings",
+            }:
+                # 正文可用即可组装：diagrams 失败时组装的 composed.pptx 退化为纯正文
                 template = self.template_service.get_template(str(generation["template_id"]))
                 generation_workspace = self.workspace.generation(generation_id)
                 remote_root = self.ftp.join(self.ftp.settings.ftp_root_dir, "generations", generation_id)
@@ -494,29 +508,51 @@ class GenerationService:
                     compose_task_id,
                     lambda: self.orchestration_service.run_task(generation["api_key"], compose_task_id),
                 )
+            elif both_terminal and generation.get("compose_status") in {
+                CHILD_STATUS_NOT_REQUESTED,
+                CHILD_STATUS_WAITING,
+            }:
+                # 正文失败，无料可组，直接标记 compose 为 failed
+                self.generation_repository.update(
+                    generation_id,
+                    {"compose_status": TASK_STATUS_FAILED},
+                )
 
         # 3. 重新读取并计算最终聚合状态
         # 注意：自动组装后 compose_status 为 pending，不能直接把整体标为 completed
         generation = self.generation_repository.get(generation_id)
+        non_terminal = {
+            TASK_STATUS_PENDING,
+            TASK_STATUS_RUNNING,
+            "stopping",
+            "resuming",
+            CHILD_STATUS_NOT_REQUESTED,
+            CHILD_STATUS_WAITING,
+        }
         statuses: list[str] = []
-        for _field, task_id in child_fields:
+        for task_id in [
+            generation.get("body_task_id"),
+            generation.get("diagram_task_id"),
+            generation.get("compose_task_id"),
+        ]:
             if task_id:
                 task = self.task_repository.get_task(task_id)
-                if task and task["status"] not in {TASK_STATUS_PENDING, CHILD_STATUS_NOT_REQUESTED}:
+                if task:
                     statuses.append(task["status"])
 
-        if any(s == TASK_STATUS_RUNNING for s in statuses):
+        if not statuses:
+            overall = GENERATION_STATUS_PENDING
+        elif any(s in non_terminal for s in statuses):
             overall = GENERATION_STATUS_RUNNING
-        elif any(s == TASK_STATUS_FAILED for s in statuses) and not any(
-            s in {TASK_STATUS_COMPLETED, GENERATION_STATUS_COMPLETED_WITH_WARNINGS} for s in statuses
-        ):
+        elif all(s == TASK_STATUS_FAILED for s in statuses):
             overall = GENERATION_STATUS_FAILED
         elif all(s == TASK_STATUS_COMPLETED for s in statuses):
             overall = GENERATION_STATUS_COMPLETED
-        elif any(s in {GENERATION_STATUS_COMPLETED_WITH_WARNINGS, "completed_with_warnings"} for s in statuses):
+        elif any(s in {TASK_STATUS_COMPLETED, "completed_with_warnings"} for s in statuses):
+            # 全部终态，至少一个成功 → 部分成功
             overall = GENERATION_STATUS_COMPLETED_WITH_WARNINGS
         else:
-            overall = GENERATION_STATUS_PENDING
+            overall = GENERATION_STATUS_FAILED
 
         fields: dict = {"status": overall}
         if overall in {GENERATION_STATUS_COMPLETED, GENERATION_STATUS_COMPLETED_WITH_WARNINGS, GENERATION_STATUS_FAILED}:

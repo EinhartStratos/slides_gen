@@ -417,13 +417,9 @@ class OpenAILikePageGenerationClient(BasePageGenerationClient):
                 logger.warning("LLM 结构化生成失败 (page=%s, attempt=%s/%s): %s", page_no, attempt, max_retries, exc)
                 if attempt < max_retries:
                     time_module.sleep(2 * attempt)
-        logger.warning("LLM 结构化生成重试 %s 次仍失败 (page=%s)，返回跳过", max_retries, page_no)
-        return StructuredPageResult(
-            page_no=page_no,
-            should_generate=False,
-            skip_reason=f"LLM 结构化生成失败，重试{max_retries}次仍不成功",
-            elements=[],
-        )
+        # 重试耗尽必须抛异常而不是返回"跳过"——LLM 故障与"模型主动判断不生成"
+        # 语义不同，前者应记为页级失败，让任务状态能如实反映失败
+        raise RuntimeError(f"LLM 结构化生成重试 {max_retries} 次仍失败 (page={page_no})")
 
     @staticmethod
     def _parse_structured_result(content: str, page_no: int) -> StructuredPageResult:
