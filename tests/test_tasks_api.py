@@ -81,6 +81,11 @@ class TestListTasks:
         # 新增字段：区分旧流程与 v4 拆分流程
         assert "task_type" in data[0]
         assert "generation_id" in data[0]
+        # 新增字段：下载地址
+        assert "download_url" in data[0]
+        assert "artifacts" in data[0]
+        legacy_item = next(item for item in data if item["task_type"] == "legacy")
+        assert legacy_item["download_url"] == f"/api/v1/tasks/{legacy_item['task_id']}/download"
 
     def test_list_tasks_filter_by_task_type(self, client, auth_headers, curl_data):
         """按 task_type 过滤：POST /tasks 创建的是 legacy 任务"""

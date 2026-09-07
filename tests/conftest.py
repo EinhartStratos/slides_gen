@@ -85,6 +85,13 @@ class MockMySQLDatabase:
                     return any(eval_condition(p) for p in parts_or)
                 parts_and = re.split(r"\s+AND\s+", cond, flags=re.IGNORECASE)
                 return all(eval_condition(p) for p in parts_and)
+            m = re.match(r"(\w+)\s+IN\s*\(([^)]*)\)", cond, re.IGNORECASE)
+            if m:
+                col = m.group(1)
+                count = m.group(2).count("%s")
+                values = params[param_idx:param_idx + count]
+                param_idx += count
+                return row.get(col) in values
             m = re.match(r"(\w+)\s*=\s*%s", cond)
             if m:
                 col = m.group(1)

@@ -42,6 +42,26 @@ TASK_TYPE_BODY = "body"
 TASK_TYPE_DIAGRAMS = "diagrams"
 TASK_TYPE_COMPOSE = "compose"
 
+# 任务列表/详情中直接返回下载地址的最终产物类型
+DOWNLOADABLE_ARTIFACT_TYPES = frozenset(
+    {
+        ARTIFACT_TYPE_RESULT_PPTX,
+        ARTIFACT_TYPE_BODY_PPTX,
+        ARTIFACT_TYPE_COMPOSED_PPTX,
+        ARTIFACT_TYPE_DIAGRAM_SVG,
+        ARTIFACT_TYPE_DIAGRAM_MANIFEST,
+    }
+)
+
+# 作为主下载地址（download_url）优先选择的 PPTX 产物类型
+PRIMARY_PPTX_ARTIFACT_TYPES = frozenset(
+    {
+        ARTIFACT_TYPE_RESULT_PPTX,
+        ARTIFACT_TYPE_BODY_PPTX,
+        ARTIFACT_TYPE_COMPOSED_PPTX,
+    }
+)
+
 # v4 生成模式
 GENERATION_MODE_LEGACY_HYBRID = "legacy_hybrid"
 GENERATION_MODE_SEPARATED_BODY_DIAGRAM = "separated_body_diagram"

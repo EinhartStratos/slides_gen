@@ -249,6 +249,18 @@ class TaskRepository:
             (task_id,),
         )
 
+    def list_artifacts_for_tasks(self, task_ids: list[str]) -> list[dict[str, Any]]:
+        """批量查询多个任务的产物，避免任务列表接口的 N+1 查询。"""
+        if not task_ids:
+            return []
+        placeholders = ", ".join(["%s"] * len(task_ids))
+        sql = (
+            "SELECT * FROM sg_generation_task_artifact "
+            f"WHERE task_id IN ({placeholders}) "
+            "ORDER BY created_at DESC"
+        )
+        return self.db.fetch_all(sql, tuple(task_ids))
+
     def list_events(self, task_id: str, limit: int = 100) -> list[dict[str, Any]]:
         sql = """
         SELECT *

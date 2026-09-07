@@ -78,6 +78,64 @@ class TestGenerationEndpoints:
         assert summary["body_pptx_artifact_id"] is not None
         assert summary["composed_pptx_artifact_id"] is not None
 
+    def test_task_list_returns_generation_downloads(self, client_with_mock_llm, auth_headers):
+        """v4 子任务在任务列表中应返回 generation_id 与产物下载地址"""
+        payload = {
+            "generation_mode": "separated_body_diagram",
+            "targets": ["body", "diagrams"],
+            "auto_compose": False,
+            "requirement_text": "\n需求文档\n项目：测试项目，包含 A、B、C 三个系统模块。\n",
+            "custom_requirements": "画产品连接关系图",
+        }
+        data = self._create_generation(client_with_mock_llm, auth_headers, payload)
+        generation_id = data["generation_id"]
+
+        for _ in range(30):
+            resp = client_with_mock_llm.get(
+                f"/api/v1/generations/{generation_id}",
+                headers=auth_headers,
+            )
+            summary = resp.json()["data"]
+            if summary["body_status"] == "completed" and summary["diagram_status"] == "completed":
+                break
+            time.sleep(1)
+        else:
+            raise AssertionError("body/diagrams 任务未在 30 秒内完成")
+
+        resp = client_with_mock_llm.get(
+            f"/api/v1/tasks?generation_id={generation_id}",
+            headers=auth_headers,
+        )
+        assert resp.status_code == 200
+        items = resp.json()["data"]
+        assert len(items) == 2
+        by_type = {item["task_type"]: item for item in items}
+
+        body_item = by_type["body"]
+        assert body_item["generation_id"] == generation_id
+        assert body_item["download_url"] is not None
+        assert body_item["download_url"].startswith(
+            f"/api/v1/tasks/{body_item['task_id']}/artifacts/"
+        )
+        assert any(a["artifact_type"] == "body_pptx" for a in body_item["artifacts"])
+
+        diagram_item = by_type["diagrams"]
+        assert diagram_item["generation_id"] == generation_id
+        # diagrams 任务主下载地址为全部 SVG 打包 zip
+        assert diagram_item["download_url"] == (
+            f"/api/v1/tasks/{diagram_item['task_id']}/diagrams/download"
+        )
+        diagram_artifacts = [
+            a for a in diagram_item["artifacts"] if a["artifact_type"] == "diagram_svg"
+        ]
+        assert len(diagram_artifacts) >= 1
+        assert all(
+            a["download_url"].startswith(
+                f"/api/v1/tasks/{diagram_item['task_id']}/artifacts/"
+            )
+            for a in diagram_artifacts
+        )
+
     def test_list_generations(self, client_with_mock_llm, auth_headers):
         """创建后应能在列表中查询到"""
         self._create_generation(

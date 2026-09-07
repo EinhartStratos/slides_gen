@@ -66,6 +66,7 @@ def build_services(settings: Settings) -> AppServices:
         template_service=template_service,
         builtin_template_service=builtin_template_service,
         default_template_id=settings.default_template_id,
+        api_prefix=settings.api_prefix,
     )
     prompt_builder = PageAnalysisPromptBuilder()
     generation_client = OpenAILikePageGenerationClient(settings=settings, prompt_builder=prompt_builder)

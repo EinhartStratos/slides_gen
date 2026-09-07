@@ -288,6 +288,14 @@ curl -X POST http://127.0.0.1:8000/api/v1/tasks \
 
 **任务类型（`task_type`）说明：** `legacy` 为旧流程任务；`body`（正文）、`diagrams`（图形）、`compose`（组装）为 v4 文本/图形拆分流程的子任务。不同模式的下载接口不同：`legacy` 用 `GET /tasks/{id}/download`，v4 产物用 `GET /tasks/{id}/artifacts/{artifact_id}/download` 或 `GET /generations/{id}/body/download` 等。
 
+**响应字段补充说明：**
+
+| 字段 | 说明 |
+|------|------|
+| `generation_id` | v4 子任务所属的 Generation ID（legacy 任务为 `null`），可用于调用 `GET /api/v1/generations/{generation_id}` |
+| `download_url` | 主下载地址。`legacy` 任务为 `GET /tasks/{id}/download`；`diagrams` 任务为 `GET /tasks/{id}/diagrams/download`（全部图形 SVG 打包 zip）；`body`/`compose` 任务为最终 PPTX 产物的 artifact 下载地址，尚未生成时为 `null` |
+| `artifacts` | 可直接下载的最终产物列表，每项含 `artifact_id`、`artifact_type`、`file_name`、`page_no`、`is_final`、`download_url` |
+
 **请求示例：**
 
 ```bash
@@ -312,8 +320,67 @@ curl http://127.0.0.1:8000/api/v1/tasks?status=completed&limit=5 \
       "template_id": "tpl_20260627132835_bce99ff8",
       "ftp_result_pptx_path": "/slides_gen_server/tasks/task_20260703160147_7358a679/result/result.pptx",
       "error_message": null,
+      "download_url": "/api/v1/tasks/task_20260703160147_7358a679/download",
+      "artifacts": [
+        {
+          "artifact_id": "art_20260703160500_aaaa",
+          "artifact_type": "result_pptx",
+          "file_name": "result.pptx",
+          "page_no": null,
+          "is_final": true,
+          "download_url": "/api/v1/tasks/task_20260703160147_7358a679/artifacts/art_20260703160500_aaaa/download"
+        }
+      ],
       "created_at": "2026-07-03T16:01:47",
       "completed_at": "2026-07-03T16:05:10"
+    },
+    {
+      "task_id": "task_20260901103600_4444",
+      "generation_id": "gen_20260901103000_a1b2c3d4",
+      "task_type": "compose",
+      "status": "completed_with_warnings",
+      "current_stage": "completed",
+      "progress": 100,
+      "template_id": "tpl_20260627132835_bce99ff8",
+      "ftp_result_pptx_path": "/slides_gen_server/generations/gen_20260901103000_a1b2c3d4/tasks/compose/task_20260901103600_4444/exports/composed.pptx",
+      "error_message": null,
+      "download_url": "/api/v1/tasks/task_20260901103600_4444/artifacts/art_compose_001/download",
+      "artifacts": [
+        {
+          "artifact_id": "art_compose_001",
+          "artifact_type": "composed_pptx",
+          "file_name": "信息披露优化方案.pptx",
+          "page_no": null,
+          "is_final": true,
+          "download_url": "/api/v1/tasks/task_20260901103600_4444/artifacts/art_compose_001/download"
+        }
+      ],
+      "created_at": "2026-09-01T10:36:00",
+      "completed_at": "2026-09-01T10:38:20"
+    },
+    {
+      "task_id": "task_20260901103000_2222",
+      "generation_id": "gen_20260901103000_a1b2c3d4",
+      "task_type": "diagrams",
+      "status": "completed_with_warnings",
+      "current_stage": "completed",
+      "progress": 100,
+      "template_id": "tpl_20260627132835_bce99ff8",
+      "ftp_result_pptx_path": "/slides_gen_server/generations/gen_20260901103000_a1b2c3d4/tasks/diagrams/task_20260901103000_2222/exports/generated.pptx",
+      "error_message": null,
+      "download_url": "/api/v1/tasks/task_20260901103000_2222/diagrams/download",
+      "artifacts": [
+        {
+          "artifact_id": "art_diagram_001",
+          "artifact_type": "diagram_svg",
+          "file_name": "diagram_3.svg",
+          "page_no": 3,
+          "is_final": false,
+          "download_url": "/api/v1/tasks/task_20260901103000_2222/artifacts/art_diagram_001/download"
+        }
+      ],
+      "created_at": "2026-09-01T10:30:00",
+      "completed_at": "2026-09-01T10:35:40"
     }
   ]
 }

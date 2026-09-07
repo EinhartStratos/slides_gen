@@ -68,6 +68,7 @@ class OpenAILikePageGenerationClient(BasePageGenerationClient):
         headers = {
             "Content-Type": "application/json",
             "Authorization": f"Bearer {api_key}",
+            "x-opencode-session": "x-opencode-session",
         }
         timeout = httpx2.Timeout(self.settings.llm_timeout_seconds, connect=30.0)
 

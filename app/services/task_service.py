@@ -4,7 +4,17 @@ from datetime import datetime
 from pathlib import Path
 import json
 
-from app.core.constants import TASK_STATUS_FAILED, TASK_STATUS_PENDING, TASK_STATUS_RESUMING, TASK_STATUS_STOPPED, TASK_STATUS_STOPPING
+from app.core.constants import (
+    DOWNLOADABLE_ARTIFACT_TYPES,
+    PRIMARY_PPTX_ARTIFACT_TYPES,
+    TASK_STATUS_FAILED,
+    TASK_STATUS_PENDING,
+    TASK_STATUS_RESUMING,
+    TASK_STATUS_STOPPED,
+    TASK_STATUS_STOPPING,
+    TASK_TYPE_DIAGRAMS,
+    TASK_TYPE_LEGACY,
+)
 from app.core.exceptions import ConflictError, NotFoundError, ServiceUnavailableError
 from app.core.utils import generate_id, json_dumps, to_iso
 from app.infrastructure.db.task_repository import TaskRepository
@@ -24,6 +34,7 @@ class TaskService:
         template_service: TemplateService,
         builtin_template_service: BuiltinTemplateService,
         default_template_id: str | None,
+        api_prefix: str = "/api/v1",
     ) -> None:
         self.repository = repository
         self.workspace = workspace
@@ -31,6 +42,7 @@ class TaskService:
         self.template_service = template_service
         self.builtin_template_service = builtin_template_service
         self.default_template_id = default_template_id
+        self.api_prefix = api_prefix.rstrip("/")
 
     def create_task(self, api_key: str, request: CreateGenerationTaskRequest) -> dict:
         if request.template_id:
@@ -98,21 +110,60 @@ class TaskService:
             raise NotFoundError(f"任务不存在: {task_id}")
         return task
 
-    def get_task_summary(self, api_key: str, task_id: str) -> dict:
-        task = self.get_task(api_key, task_id)
+    def _task_summary_fields(self, task: dict, artifacts: list[dict]) -> dict:
+        """组装任务概要字段，附带产物下载地址。
+
+        - download_url：主下载地址。legacy 任务指向 /tasks/{id}/download；
+          diagrams 任务指向全部图形 SVG 打包 zip 的 /tasks/{id}/diagrams/download；
+          其余 v4 子任务指向最终 PPTX 产物的 artifact 下载地址（未生成时为 null）。
+        - artifacts：可直接下载的最终产物列表（result/body/composed pptx、diagram_svg、diagram_manifest）。
+        """
+        task_id = task["task_id"]
+        downloadable = [
+            {
+                "artifact_id": artifact["artifact_id"],
+                "artifact_type": artifact["artifact_type"],
+                "file_name": artifact.get("file_name"),
+                "page_no": artifact.get("page_no"),
+                "is_final": bool(artifact.get("is_final")),
+                "download_url": f"{self.api_prefix}/tasks/{task_id}/artifacts/{artifact['artifact_id']}/download",
+            }
+            for artifact in artifacts
+            if artifact.get("artifact_type") in DOWNLOADABLE_ARTIFACT_TYPES
+        ]
+        primary = next((a for a in downloadable if a["is_final"]), None)
+        if primary is None:
+            primary = next(
+                (a for a in downloadable if a["artifact_type"] in PRIMARY_PPTX_ARTIFACT_TYPES),
+                None,
+            )
+        task_type = task.get("task_type") or TASK_TYPE_LEGACY
+        if task_type == TASK_TYPE_LEGACY:
+            download_url = f"{self.api_prefix}/tasks/{task_id}/download"
+        elif task_type == TASK_TYPE_DIAGRAMS:
+            download_url = f"{self.api_prefix}/tasks/{task_id}/diagrams/download"
+        else:
+            download_url = primary["download_url"] if primary else None
         return {
-            "task_id": task["task_id"],
+            "task_id": task_id,
             "generation_id": task.get("generation_id"),
-            "task_type": task.get("task_type") or "legacy",
+            "task_type": task_type,
             "status": task["status"],
             "current_stage": task["current_stage"],
             "progress": float(task["progress"]),
             "template_id": task.get("template_id"),
             "ftp_result_pptx_path": task.get("ftp_result_pptx_path"),
             "error_message": task.get("error_message"),
+            "download_url": download_url,
+            "artifacts": downloadable,
             "created_at": to_iso(task.get("created_at")),
             "completed_at": to_iso(task.get("completed_at")),
         }
+
+    def get_task_summary(self, api_key: str, task_id: str) -> dict:
+        task = self.get_task(api_key, task_id)
+        artifacts = self.repository.list_artifacts(task_id)
+        return self._task_summary_fields(task, artifacts)
 
     def list_tasks(
         self,
@@ -130,20 +181,11 @@ class TaskService:
                 for row in self.repository.list_task_ids(api_key, status, generation_id, task_type)
             ]
         rows = self.repository.list_tasks(api_key, status, offset, limit, generation_id, task_type)
+        artifacts_by_task: dict[str, list[dict]] = {}
+        for artifact in self.repository.list_artifacts_for_tasks([row["task_id"] for row in rows]):
+            artifacts_by_task.setdefault(artifact["task_id"], []).append(artifact)
         return [
-            {
-                "task_id": row["task_id"],
-                "generation_id": row.get("generation_id"),
-                "task_type": row.get("task_type") or "legacy",
-                "status": row["status"],
-                "current_stage": row["current_stage"],
-                "progress": float(row["progress"]),
-                "template_id": row.get("template_id"),
-                "ftp_result_pptx_path": row.get("ftp_result_pptx_path"),
-                "error_message": row.get("error_message"),
-                "created_at": to_iso(row.get("created_at")),
-                "completed_at": to_iso(row.get("completed_at")),
-            }
+            self._task_summary_fields(row, artifacts_by_task.get(row["task_id"], []))
             for row in rows
         ]
 
