@@ -77,6 +77,57 @@ class TestGenerationEndpoints:
         assert summary["has_composed_download"] is True
         assert summary["body_pptx_artifact_id"] is not None
         assert summary["composed_pptx_artifact_id"] is not None
+        # 实时进度与下载地址字段
+        assert summary["body_progress"] == 100.0
+        assert summary["diagram_progress"] == 100.0
+        assert summary["compose_progress"] == 100.0
+        assert summary["body_download_url"] is not None
+        assert summary["diagrams_download_url"] is not None
+        assert summary["composed_download_url"] is not None
+
+    def test_body_download_available_before_compose(self, client_with_mock_llm, auth_headers):
+        """body 完成后即可下载正文产物，无需等待/触发 compose。"""
+        data = self._create_generation(
+            client_with_mock_llm,
+            auth_headers,
+            {
+                "generation_mode": "separated_body_diagram",
+                "targets": ["body"],
+                "auto_compose": False,
+                "requirement_text": "测试",
+            },
+        )
+        generation_id = data["generation_id"]
+
+        for _ in range(30):
+            resp = client_with_mock_llm.get(
+                f"/api/v1/generations/{generation_id}",
+                headers=auth_headers,
+            )
+            summary = resp.json()["data"]
+            if summary["body_status"] == "completed":
+                break
+            time.sleep(1)
+        else:
+            raise AssertionError("body 任务未在 30 秒内完成")
+
+        # compose 未请求时，正文产物已可下载
+        assert summary["compose_status"] == "not_requested"
+        assert summary["compose_progress"] is None
+        assert summary["body_progress"] == 100.0
+        assert summary["body_download_url"] == (
+            f"/api/v1/generations/{generation_id}/body/download"
+        )
+        assert summary["composed_download_url"] is None
+        assert summary["diagrams_download_url"] is None
+
+        # 直接下载验证
+        resp = client_with_mock_llm.get(
+            f"/api/v1/generations/{generation_id}/body/download",
+            headers=auth_headers,
+        )
+        assert resp.status_code == 200
+        assert len(resp.content) > 0
 
     def test_task_list_returns_generation_downloads(self, client_with_mock_llm, auth_headers):
         """v4 子任务在任务列表中应返回 generation_id 与产物下载地址"""

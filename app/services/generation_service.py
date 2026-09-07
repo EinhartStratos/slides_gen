@@ -287,10 +287,46 @@ class GenerationService:
             body_task, diagram_task, diagrams
         )
 
+        # 子能力状态/进度实时取自任务行，避免依赖 update_aggregation 的延迟刷新：
+        # body/diagrams 一旦完成即可下载，不需要等 compose 结束。
+        def _live_status(task: dict | None, stored: str | None) -> str | None:
+            return task["status"] if task else stored
+
+        def _live_progress(task: dict | None) -> float | None:
+            return float(task["progress"]) if task else None
+
+        body_status = _live_status(body_task, generation.get("body_status"))
+        diagram_status = _live_status(diagram_task, generation.get("diagram_status"))
+        compose_status = _live_status(compose_task, generation.get("compose_status"))
+
+        status = generation.get("status") or GENERATION_STATUS_PENDING
+        if status == GENERATION_STATUS_PENDING and any(
+            s in {TASK_STATUS_RUNNING, TASK_STATUS_RESUMING, "stopping"}
+            for s in (body_status, diagram_status, compose_status)
+        ):
+            status = GENERATION_STATUS_RUNNING
+
+        api_prefix = (self.settings.api_prefix or "/api/v1").rstrip("/")
+        body_download_url = (
+            f"{api_prefix}/generations/{generation_id}/body/download"
+            if body_pptx_artifact_id
+            else None
+        )
+        diagrams_download_url = (
+            f"{api_prefix}/generations/{generation_id}/diagrams/download"
+            if diagrams
+            else None
+        )
+        composed_download_url = (
+            f"{api_prefix}/tasks/{generation['compose_task_id']}/artifacts/{composed_pptx_artifact_id}/download"
+            if composed_pptx_artifact_id and generation.get("compose_task_id")
+            else None
+        )
+
         return {
             "generation_id": generation["generation_id"],
             "generation_mode": generation["generation_mode"],
-            "status": generation["status"],
+            "status": status,
             "auto_compose": bool(generation.get("auto_compose")),
             "requirement_text_chars": int(generation.get("requirement_text_chars", 0)),
             "requirement_text_warning": bool(generation.get("warning_message")),
@@ -298,9 +334,12 @@ class GenerationService:
             "body_task_id": generation.get("body_task_id"),
             "diagram_task_id": generation.get("diagram_task_id"),
             "compose_task_id": generation.get("compose_task_id"),
-            "body_status": generation.get("body_status"),
-            "diagram_status": generation.get("diagram_status"),
-            "compose_status": generation.get("compose_status"),
+            "body_status": body_status,
+            "diagram_status": diagram_status,
+            "compose_status": compose_status,
+            "body_progress": _live_progress(body_task),
+            "diagram_progress": _live_progress(diagram_task),
+            "compose_progress": _live_progress(compose_task),
             "kept_page_count": kept,
             "skipped_page_count": skipped,
             "diagram_count": diagram_count,
@@ -309,6 +348,9 @@ class GenerationService:
             "has_body_download": body_pptx_artifact_id is not None,
             "has_diagram_downloads": bool(diagrams),
             "has_composed_download": composed_pptx_artifact_id is not None,
+            "body_download_url": body_download_url,
+            "diagrams_download_url": diagrams_download_url,
+            "composed_download_url": composed_download_url,
             "warning_message": generation.get("warning_message"),
             "error_message": generation.get("error_message"),
             "created_at": to_iso(generation.get("created_at")),
