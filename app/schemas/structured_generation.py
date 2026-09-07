@@ -107,4 +107,5 @@ class StructuredPageResult(SchemaModel):
     page_no: int = Field(..., ge=1, description="页码")
     should_generate: bool = Field(..., description="该页是否应该保留到最终 PPT")
     skip_reason: str = Field(default="", description="当页面被跳过时的原因")
+    page_type: str | None = Field(default=None, description="页面类型: cover/toc/content/diagram/end；toc/end 表示原样保留模板页")
     elements: list[GeneratedElement] = Field(default_factory=list, description="本页实际需要回填的元素")

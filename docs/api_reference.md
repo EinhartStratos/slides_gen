@@ -278,11 +278,15 @@ curl -X POST http://127.0.0.1:8000/api/v1/tasks \
 | 参数 | 类型 | 默认值 | 说明 |
 |------|------|--------|------|
 | `status` | string | null | 按状态过滤 |
+| `generation_id` | string | null | 只查询指定 Generation 的子任务 |
+| `task_type` | string | null | 按 `legacy` / `body` / `diagrams` / `compose` 过滤 |
 | `offset` | int | 0 | 分页偏移 |
 | `limit` | int | 20 | 每页数量 |
 | `ids_only` | bool | false | 仅返回任务 ID 列表 |
 
-**状态可选值：** `pending` / `running` / `stopping` / `stopped` / `resuming` / `completed` / `failed` / `cancelled`
+**状态可选值：** `pending` / `running` / `stopping` / `stopped` / `resuming` / `completed` / `completed_with_warnings` / `failed` / `cancelled`
+
+**任务类型（`task_type`）说明：** `legacy` 为旧流程任务；`body`（正文）、`diagrams`（图形）、`compose`（组装）为 v4 文本/图形拆分流程的子任务。不同模式的下载接口不同：`legacy` 用 `GET /tasks/{id}/download`，v4 产物用 `GET /tasks/{id}/artifacts/{artifact_id}/download` 或 `GET /generations/{id}/body/download` 等。
 
 **请求示例：**
 
@@ -300,6 +304,8 @@ curl http://127.0.0.1:8000/api/v1/tasks?status=completed&limit=5 \
   "data": [
     {
       "task_id": "task_20260703160147_7358a679",
+      "generation_id": null,
+      "task_type": "legacy",
       "status": "completed",
       "current_stage": "completed",
       "progress": 100,
@@ -332,6 +338,8 @@ curl http://127.0.0.1:8000/api/v1/tasks/task_20260703160147_7358a679 \
   "message": "ok",
   "data": {
     "task_id": "task_20260703160147_7358a679",
+    "generation_id": null,
+    "task_type": "legacy",
     "status": "running",
     "current_stage": "page_generation",
     "progress": 45.83,
@@ -1136,7 +1144,28 @@ Content-Type: image/svg+xml
 Content-Disposition: attachment; filename="项目整体系统交互架构图.svg"
 ```
 
-### 4.10 任务查询新增字段【新增·待实现】
+### `GET /api/v1/tasks/{task_id}/diagrams/download`
+
+无论图形数量多少，统一把该图形任务的全部 SVG 压缩为一个 zip 下载：
+
+```http
+Content-Type: application/zip
+Content-Disposition: attachment; filename="diagrams_{task_id}.zip"
+```
+
+Generation 级等价接口：`GET /api/v1/generations/{generation_id}/diagrams/download`。
+
+### `GET /api/v1/generations/{generation_id}/body/download`
+
+下载未插入图形的纯文本 `body.pptx`。即使同时选择了 `body` + `diagrams` 并完成组装，
+该正文 PPTX 仍然可单独下载：
+
+```http
+Content-Type: application/vnd.openxmlformats-officedocument.presentationml.presentation
+Content-Disposition: attachment; filename="body_{generation_id}.pptx"
+```
+
+### 4.10 任务查询新增字段【新增】
 
 现有 `GET /api/v1/tasks` 和 `GET /api/v1/tasks/{task_id}` 在保持原字段的基础上增加。
 

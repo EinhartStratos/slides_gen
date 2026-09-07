@@ -232,6 +232,12 @@ class GenerationService:
             self.ftp.join(remote_task_dir, "input", "requirement.md"),
         )
 
+        # 结果 PPTX 文件名按任务类型区分：body→body.pptx，compose→composed.pptx
+        result_filename = {
+            TASK_TYPE_BODY: "body.pptx",
+            TASK_TYPE_COMPOSE: "composed.pptx",
+        }.get(task_type, "generated.pptx")
+
         self.task_repository.create_task(
             {
                 **child_payload,
@@ -242,7 +248,7 @@ class GenerationService:
                 "ftp_svg_output_dir": self.ftp.join(remote_task_dir, "svg_output"),
                 "ftp_svg_final_dir": self.ftp.join(remote_task_dir, "svg_final"),
                 "ftp_validation_report_path": self.ftp.join(remote_task_dir, "validation", "validation_report.json"),
-                "ftp_result_pptx_path": self.ftp.join(remote_task_dir, "exports", "generated.pptx"),
+                "ftp_result_pptx_path": self.ftp.join(remote_task_dir, "exports", result_filename),
             }
         )
         self.task_service.create_event(task_id, api_key, "created", "queued", f"{task_type} 子任务已创建")
@@ -319,6 +325,26 @@ class GenerationService:
             if task_id:
                 artifacts.extend(self.task_repository.list_artifacts(task_id))
         return artifacts
+
+    def download_body_pptx(self, api_key: str, generation_id: str) -> Path:
+        """下载未插入图形的纯文本 body.pptx（body 任务的最终产物）。"""
+        generation = self.generation_repository.get_owned(generation_id, api_key)
+        if generation is None:
+            raise NotFoundError(f"Generation 不存在: {generation_id}")
+        body_task_id = generation.get("body_task_id")
+        if not body_task_id:
+            raise NotFoundError("该 Generation 没有 body 任务")
+        artifact = next(
+            (
+                a for a in self.task_repository.list_artifacts(body_task_id)
+                if a.get("artifact_type") == "body_pptx" and a.get("is_final")
+            ),
+            None,
+        )
+        if artifact is None:
+            raise NotFoundError("body.pptx 尚未生成")
+        local_path = self.workspace.temp_path(f"body_{generation_id}.pptx")
+        return self.ftp.download_file(str(artifact["ftp_path"]), local_path)
 
     def list_diagrams(self, api_key: str, generation_id: str) -> dict:
         generation = self.generation_repository.get_owned(generation_id, api_key)

@@ -17,13 +17,18 @@ router = APIRouter()
 @router.get("/tasks", response_model=ApiResponse)
 async def list_tasks(
     status: str | None = None,
+    generation_id: str | None = None,
+    task_type: str | None = None,
     offset: int = 0,
     limit: int = 20,
     ids_only: bool = False,
     api_key: str = Depends(get_api_key),
     services: AppServices = Depends(get_app_services),
 ) -> ApiResponse:
-    data = services.task_service.list_tasks(api_key, status, offset, limit, ids_only)
+    data = services.task_service.list_tasks(
+        api_key, status, offset, limit, ids_only,
+        generation_id=generation_id, task_type=task_type,
+    )
     return ApiResponse(data=data)
 
 
@@ -117,7 +122,7 @@ async def download_task_result(
 ):
     task = services.task_service.get_task(api_key, task_id)
     ftp_path = task.get("ftp_result_pptx_path")
-    if not ftp_path or task.get("status") != "completed":
+    if not ftp_path or task.get("status") not in {"completed", "completed_with_warnings"}:
         return ApiResponse(code=409, message="任务尚未完成，暂不可下载", data=None)
     task_workspace = services.container.workspace.task(task_id)
     local_path = services.container.ftp.download_file(str(ftp_path), task_workspace.result_pptx_path)

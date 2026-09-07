@@ -32,6 +32,7 @@ from app.core.constants import (
     TASK_TYPE_BODY,
     TASK_TYPE_COMPOSE,
     TASK_TYPE_DIAGRAMS,
+    TEMPLATE_COPY_PAGE_TYPES,
 )
 from app.core.utils import generate_id, json_dumps
 from app.core.config import Settings
@@ -496,6 +497,37 @@ class OrchestrationService:
         with lock:
             all_plans[page_no] = page_plan
 
+        # 目录页/致谢页：必须有，且不经过 LLM 改写，直接保留模板页
+        page_type_early = page_plan.get("page_type", "content")
+        page_purpose_early = (page_rule or {}).get("page_purpose", "")
+        template_copy_type = next(
+            (t for t in (page_type_early, page_purpose_early) if t in TEMPLATE_COPY_PAGE_TYPES),
+            None,
+        )
+        if template_copy_type is None:
+            # 页名关键词兜底：防止规划把目录/致谢页误标为正文
+            name_lower = f"{page_name} {page_plan.get('page_title') or ''}".lower()
+            if any(kw in name_lower for kw in ("目录", "toc", "contents")):
+                template_copy_type = "toc"
+            elif any(kw in name_lower for kw in ("致谢", "感谢", "thank", "acknowledg")):
+                template_copy_type = "end"
+        if template_copy_type is not None:
+            self._handle_template_copy_page(
+                api_key=api_key,
+                task_id=task_id,
+                page_no=page_no,
+                page_name=page_name,
+                page_type=template_copy_type,
+                template_svg_ftp_path=template_svg_ftp_path,
+                task_workspace=task_workspace,
+                task=task,
+                counters=counters,
+                lock=lock,
+                total_pages=total_pages,
+                structured_pages=structured_pages,
+            )
+            return
+
         if not page_plan.get("should_generate", True):
             with lock:
                 counters["processed"] += 1
@@ -705,6 +737,79 @@ class OrchestrationService:
             self.task_service.create_event(task_id, api_key, "page_failed", "page_generation", f"第 {page_no} 页失败: {exc}", page_no=page_no)
             with lock:
                 self._update_progress(task_id, counters, total_pages)
+
+    def _handle_template_copy_page(
+        self,
+        api_key: str,
+        task_id: str,
+        page_no: int,
+        page_name: str,
+        page_type: str,
+        template_svg_ftp_path: str | None,
+        task_workspace,
+        task: dict,
+        counters: dict,
+        lock: threading.Lock,
+        total_pages: int,
+        structured_pages: dict | None,
+    ) -> None:
+        """目录页/致谢页：必须有，直接保留模板页，不经过 LLM 生成。
+
+        写出一个 elements 为空的 structured_result 产物并标记 page_type，
+        组装任务据此原样保留模板 slide。
+        """
+        result = StructuredPageResult(
+            page_no=page_no,
+            should_generate=True,
+            skip_reason="",
+            page_type=page_type,
+            elements=[],
+        )
+        if self.pptx_builder_service is not None:
+            result_path = self.pptx_builder_service.save_page_result(task_workspace, page_no, result)
+        else:
+            result_path = task_workspace.structured_results_dir / f"page_{page_no:02d}.json"
+            result_path.parent.mkdir(parents=True, exist_ok=True)
+            result_path.write_text(
+                result.model_dump_json(exclude_none=True), encoding="utf-8",
+            )
+        ftp_result_path = self.ftp.upload_file(
+            result_path,
+            self.ftp.join(str(task["ftp_task_dir"]), "structured_results", result_path.name),
+        )
+        self.task_service.create_artifact(
+            task_id,
+            "structured_result",
+            ftp_result_path,
+            result_path.name,
+            page_no=page_no,
+            file_size_bytes=result_path.stat().st_size,
+            content_type="application/json",
+        )
+        self.task_service.repository.upsert_page(
+            {
+                "task_id": task_id,
+                "page_no": page_no,
+                "page_name": page_name,
+                "template_svg_ftp_path": template_svg_ftp_path,
+                "analysis_json_ftp_path": ftp_result_path,
+                "status": PAGE_STATUS_COMPLETED,
+                "should_generate": 1,
+                "page_type": page_type,
+                "completed_at": datetime.now(),
+            }
+        )
+        self.task_service.create_event(
+            task_id, api_key, "page_completed", "page_generation",
+            f"第 {page_no} 页为{('目录' if page_type == 'toc' else '致谢')}页，保留模板原样",
+            page_no=page_no,
+        )
+        with lock:
+            counters["processed"] += 1
+            counters["completed"] += 1
+            if structured_pages is not None:
+                structured_pages[page_no] = result
+            self._update_progress(task_id, counters, total_pages)
 
     def _process_structured_page(
         self,

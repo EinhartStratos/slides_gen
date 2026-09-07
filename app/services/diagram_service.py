@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+import logging
 import re
+import zipfile
 from pathlib import Path
 
 from app.core.exceptions import NotFoundError
@@ -9,6 +11,9 @@ from app.infrastructure.db.diagram_repository import DiagramRepository
 from app.infrastructure.db.task_repository import TaskRepository
 from app.infrastructure.ppt_master.project_workspace import ProjectWorkspace
 from app.infrastructure.storage.ftp import FtpStorage
+
+
+logger = logging.getLogger(__name__)
 
 
 class DiagramService:
@@ -100,6 +105,34 @@ class DiagramService:
         local_path = self.workspace.temp_path(f"diagram_{diagram_id}.svg")
         self.ftp.download_file(str(ftp_path), local_path)
         return local_path
+
+    def download_all_zip(self, api_key: str, task_id: str) -> Path:
+        """下载该任务全部图形 SVG，统一打包为单个 zip 文件。"""
+        task = self.task_repository.get_owned_task(task_id, api_key)
+        if task is None:
+            raise NotFoundError(f"任务不存在或无权限: {task_id}")
+        diagrams = self.diagram_repository.list_by_task(task_id)
+
+        zip_path = self.workspace.temp_path(f"diagrams_{task_id}.zip")
+        count = 0
+        with zipfile.ZipFile(zip_path, "w", zipfile.ZIP_DEFLATED) as zf:
+            for row in diagrams:
+                ftp_path = row.get("ftp_final_svg_path") or row.get("ftp_original_svg_path")
+                if not ftp_path:
+                    continue
+                local_path = self.workspace.temp_path(f"diagram_{row['diagram_id']}.svg")
+                try:
+                    self.ftp.download_file(str(ftp_path), local_path)
+                except Exception as exc:
+                    logger.warning("下载图形 SVG 失败 (%s): %s", row["diagram_id"], exc)
+                    continue
+                arcname = local_path.name
+                if not arcname.lower().endswith(".svg"):
+                    arcname = f"{arcname}.svg"
+                zf.write(local_path, arcname)
+                count += 1
+        logger.info("图形打包完成: task=%s, count=%d, zip=%s", task_id, count, zip_path)
+        return zip_path
 
     @staticmethod
     def _sanitize_svg(svg_path: Path) -> str:

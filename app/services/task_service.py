@@ -102,6 +102,8 @@ class TaskService:
         task = self.get_task(api_key, task_id)
         return {
             "task_id": task["task_id"],
+            "generation_id": task.get("generation_id"),
+            "task_type": task.get("task_type") or "legacy",
             "status": task["status"],
             "current_stage": task["current_stage"],
             "progress": float(task["progress"]),
@@ -112,13 +114,27 @@ class TaskService:
             "completed_at": to_iso(task.get("completed_at")),
         }
 
-    def list_tasks(self, api_key: str, status: str | None, offset: int, limit: int, ids_only: bool) -> list[dict] | list[str]:
+    def list_tasks(
+        self,
+        api_key: str,
+        status: str | None,
+        offset: int,
+        limit: int,
+        ids_only: bool,
+        generation_id: str | None = None,
+        task_type: str | None = None,
+    ) -> list[dict] | list[str]:
         if ids_only:
-            return [row["task_id"] for row in self.repository.list_task_ids(api_key, status)]
-        rows = self.repository.list_tasks(api_key, status, offset, limit)
+            return [
+                row["task_id"]
+                for row in self.repository.list_task_ids(api_key, status, generation_id, task_type)
+            ]
+        rows = self.repository.list_tasks(api_key, status, offset, limit, generation_id, task_type)
         return [
             {
                 "task_id": row["task_id"],
+                "generation_id": row.get("generation_id"),
+                "task_type": row.get("task_type") or "legacy",
                 "status": row["status"],
                 "current_stage": row["current_stage"],
                 "progress": float(row["progress"]),
@@ -167,6 +183,7 @@ class TaskService:
                 "should_generate": row.get("should_generate"),
                 "skip_reason": row.get("skip_reason"),
                 "status": row["status"],
+                "page_type": row.get("page_type"),
                 "diagram_kind": row.get("diagram_kind"),
                 "ftp_generated_svg_path": row.get("ftp_generated_svg_path"),
                 "ftp_final_svg_path": row.get("ftp_final_svg_path"),

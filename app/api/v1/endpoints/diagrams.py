@@ -13,6 +13,21 @@ from app.services.bootstrap import AppServices
 router = APIRouter()
 
 
+@router.get("/{task_id}/diagrams/download")
+async def download_all_diagrams(
+    task_id: str,
+    api_key: str = Depends(get_api_key),
+    services: AppServices = Depends(get_app_services),
+):
+    """无论有多少个 SVG，统一压缩为一个 zip 文件，直接下载全部。"""
+    zip_path = services.diagram_service.download_all_zip(api_key, task_id)
+    return FileResponse(
+        path=zip_path,
+        filename=zip_path.name,
+        media_type="application/zip",
+    )
+
+
 @router.get("/{task_id}/diagrams/{diagram_id}", response_model=ApiResponse)
 async def get_diagram(
     task_id: str,

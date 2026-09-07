@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import json
 import logging
+import re
 from pathlib import Path
 
 from app.infrastructure.llm.base import BasePageGenerationClient
@@ -86,7 +87,7 @@ class PptxBuilderService:
                 skip_reason="生成客户端未配置",
                 elements=[],
             )
-        return self.generation_client.generate_page_content(
+        result = self.generation_client.generate_page_content(
             api_key=api_key,
             requirement_text=requirement_text,
             page_no=page_no,
@@ -98,6 +99,27 @@ class PptxBuilderService:
             page_generation_rules_text=page_generation_rules_text,
             custom_requirements=custom_requirements,
         )
+        return self._sanitize_result(result)
+
+    @staticmethod
+    def _sanitize_result(result: StructuredPageResult) -> StructuredPageResult:
+        """清理结构化结果：剔除混入文本的 SVG/XML 源码，避免把源码当正文回填。
+
+        图形页的正文只需要文字说明；真正的图形由 diagram 任务生成、
+        组装时以原生 DrawingML 形状插入，而不是把 <svg> 源码塞进文本框。
+        """
+        tag_pattern = re.compile(r"</?[a-zA-Z][^<>]*>")
+        cleaned_elements = []
+        for element in result.elements:
+            if element.type == "text" and element.content:
+                content = element.content
+                if tag_pattern.search(content):
+                    # 剥离所有 XML/SVG 标签，只保留纯文本
+                    content = tag_pattern.sub("", content).strip()
+                element.content = content or None
+            cleaned_elements.append(element)
+        result.elements = cleaned_elements
+        return result
 
     def save_page_result(
         self,

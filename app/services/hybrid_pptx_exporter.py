@@ -17,18 +17,28 @@ from __future__ import annotations
 from copy import deepcopy
 from io import BytesIO
 import logging
+import os
+import re
 import sys
+import tempfile
 from pathlib import Path
 
 from lxml import etree
 from pptx import Presentation
 
 from app.core.config import Settings
+from app.core.constants import TEMPLATE_COPY_PAGE_TYPES
 from app.infrastructure.ppt_master.pptx_builder import PPTBuilder
 from app.schemas.structured_generation import StructuredPageResult
 
 
 logger = logging.getLogger(__name__)
+
+# 1 SVG px = 9525 EMU（96 DPI），与 vendor svg_to_pptx 的换算一致
+_EMU_PER_PX = 9525
+
+# DrawingML relationship 属性（r:embed / r:link / r:id 等）
+_R_ATTR_RE = re.compile(r"^\{http://schemas\.openxmlformats\.org/officeDocument/2006/relationships\}")
 
 # DrawingML 命名空间
 NS_P = "http://schemas.openxmlformats.org/presentationml/2006/main"
@@ -103,12 +113,20 @@ class HybridPptxExporter:
                 page_to_slide_indices[page_no] = []
                 continue
 
-            has_structured = page_no in structured_pages
+            result = structured_pages.get(page_no)
             has_svg = page_no in svg_pages
             insert_svg = page_no in insert_svg_pages
 
-            if has_structured:
-                result = structured_pages[page_no]
+            # 目录页/致谢页：原样保留模板页，不添加或修改任何内容
+            if (
+                result is not None
+                and result.should_generate
+                and result.page_type in TEMPLATE_COPY_PAGE_TYPES
+            ):
+                page_to_slide_indices[page_no] = [slide_index]
+                continue
+
+            if result is not None:
                 if not result.should_generate:
                     delete_indices.add(slide_index)
                     page_to_slide_indices[page_no] = []
@@ -120,12 +138,16 @@ class HybridPptxExporter:
 
                 # v4 组装：在已回填的结构化页面上再插入图形
                 if has_svg and insert_svg:
-                    svg_file = svg_pages[page_no]
-                    self._inject_svg_slide(presentation, slide_index, svg_file, replace_existing=False)
+                    self._safe_inject_svg(
+                        presentation, slide_index, svg_pages[page_no],
+                        page_no=page_no, replace_existing=False,
+                    )
 
             elif has_svg:
-                svg_file = svg_pages[page_no]
-                self._inject_svg_slide(presentation, slide_index, svg_file, replace_existing=not insert_svg)
+                self._safe_inject_svg(
+                    presentation, slide_index, svg_pages[page_no],
+                    page_no=page_no, replace_existing=not insert_svg,
+                )
                 page_to_slide_indices[page_no] = [slide_index]
 
             else:
@@ -149,6 +171,23 @@ class HybridPptxExporter:
         presentation.save(output_path)
         return output_path
 
+    def _safe_inject_svg(
+        self,
+        presentation: Presentation,
+        slide_index: int,
+        svg_file: Path,
+        page_no: int,
+        replace_existing: bool,
+    ) -> None:
+        """注入失败时仅告警跳过，避免单张图形拖垮整个导出。"""
+        try:
+            self._inject_svg_slide(
+                presentation, slide_index, svg_file,
+                replace_existing=replace_existing,
+            )
+        except Exception as exc:
+            logger.warning("第 %s 页图形 SVG 注入失败，保留原有内容: %s", page_no, exc)
+
     def _inject_svg_slide(
         self,
         presentation: Presentation,
@@ -158,11 +197,15 @@ class HybridPptxExporter:
     ) -> None:
         """将 SVG 转换的 DrawingML 注入到模板 PPTX 的指定 slide。
 
-        保持可编辑形状，不渲染为图片。
+        保持可编辑形状，不渲染为图片。插入模式（replace_existing=False）时，
+        先把图形缩放平移到页面中下部区域，避免覆盖标题与正文。
         """
         convert_func = self._get_svg_convert_func()
+        source_svg = svg_file
+        if not replace_existing:
+            source_svg = self._position_svg_lower_middle(presentation, svg_file)
         slide_xml, media_files, rel_entries, _ = convert_func(
-            svg_file, slide_num=slide_index + 1, verbose=False,
+            source_svg, slide_num=slide_index + 1, verbose=False,
         )
 
         # 解析转换后的 XML
@@ -195,6 +238,9 @@ class HybridPptxExporter:
                 if tag not in ("nvGrpSpPr", "grpSpPr"):
                     target_sp_tree.remove(child)
 
+        # 先把转换产生的图片资源挂到目标 slide，建立 旧 rId → 新 rId 映射
+        rid_map = self._attach_media(target_slide, media_files, rel_entries)
+
         # 计算 shape ID 偏移量，避免与已有 slide 的 shape ID 冲突
         max_existing_id = self._find_max_shape_id(presentation)
         id_offset = max_existing_id
@@ -207,19 +253,123 @@ class HybridPptxExporter:
             cloned = deepcopy(child)
             # 偏移所有 shape ID
             self._offset_shape_ids(cloned, id_offset)
+            # 改写 r:embed 等关系引用到目标 slide 的 rId；引用缺失则丢弃该元素
+            if not self._remap_relationship_ids(cloned, rid_map):
+                logger.warning("跳过引用缺失资源的图形元素 (slide=%s)", slide_index)
+                continue
             target_sp_tree.append(cloned)
 
-        # 处理 media 文件和 relationships
-        if media_files:
-            slide_part = target_slide.part
-            for filename, data in media_files.items():
-                try:
-                    image_part = slide_part.get_or_add_image_part(BytesIO(data))
-                    logger.debug("已添加图片到 slide %s: %s", slide_index, filename)
-                except Exception as exc:
-                    logger.warning("添加图片失败 (slide=%s, file=%s): %s", slide_index, filename, exc)
-
         logger.info("SVG slide 注入完成 (slide=%s, svg=%s)", slide_index, svg_file.name)
+
+    def _attach_media(
+        self,
+        slide,
+        media_files: dict,
+        rel_entries: list,
+    ) -> dict:
+        """把转换产生的图片挂到目标 slide，返回 旧 rId → 新 rId 映射。"""
+        rid_map: dict[str, str] = {}
+        if not rel_entries:
+            return rid_map
+        slide_part = slide.part
+        for rel in rel_entries:
+            target = rel.get("target", "")
+            if not target.startswith("../media/"):
+                continue
+            media_name = target.split("../media/", 1)[1]
+            data = media_files.get(media_name)
+            if data is None:
+                continue
+            try:
+                _image_part, new_rid = slide_part.get_or_add_image_part(BytesIO(data))
+                rid_map[rel.get("id")] = new_rid
+            except Exception as exc:
+                logger.warning("图片资源挂载失败 (file=%s): %s", media_name, exc)
+        return rid_map
+
+    def _remap_relationship_ids(self, element, rid_map: dict) -> bool:
+        """把克隆元素中的 r:* 关系引用改写到目标 slide 的实际 rId。
+
+        返回 False 表示存在无法解析的引用（例如图片挂载失败），调用方应丢弃该元素。
+        """
+        ok = True
+        for attr_name, attr_val in list(element.attrib.items()):
+            if not _R_ATTR_RE.match(attr_name):
+                continue
+            new_rid = rid_map.get(attr_val)
+            if new_rid:
+                element.attrib[attr_name] = new_rid
+            else:
+                ok = False
+        for child in element:
+            if not self._remap_relationship_ids(child, rid_map):
+                ok = False
+        return ok
+
+    def _position_svg_lower_middle(self, presentation: Presentation, svg_file: Path) -> Path:
+        """把单图 SVG 包一层 translate+scale，使图形落在页面中下部区域。"""
+        try:
+            tree = etree.parse(str(svg_file))
+            root = tree.getroot()
+            vb_x, vb_y, vb_w, vb_h = self._svg_view_box(root)
+            if vb_w <= 0 or vb_h <= 0:
+                return svg_file
+
+            slide_w_px = (presentation.slide_width or 0) / _EMU_PER_PX
+            slide_h_px = (presentation.slide_height or 0) / _EMU_PER_PX
+            if slide_w_px <= 0 or slide_h_px <= 0:
+                return svg_file
+
+            # 目标区域：水平居中、宽度约 86% 页宽，占据页面下方约 45% 高度
+            target_w = slide_w_px * 0.86
+            target_h = slide_h_px * 0.45
+            scale = min(target_w / vb_w, target_h / vb_h)
+            draw_w = vb_w * scale
+            draw_h = vb_h * scale
+            tx = (slide_w_px - draw_w) / 2 - vb_x * scale
+            ty = slide_h_px * 0.96 - (vb_y + vb_h) * scale
+
+            svg_ns = "http://www.w3.org/2000/svg"
+            group = etree.SubElement(root, f"{{{svg_ns}}}g")
+            group.set("transform", f"translate({tx:.2f} {ty:.2f}) scale({scale:.4f})")
+            for child in list(root):
+                if child is group:
+                    continue
+                if etree.QName(child).localname == "defs":
+                    continue
+                root.remove(child)
+                group.append(child)
+
+            fd, positioned_name = tempfile.mkstemp(prefix="diagram_pos_", suffix=".svg")
+            os.close(fd)
+            positioned_path = Path(positioned_name)
+            tree.write(str(positioned_path), encoding="utf-8", xml_declaration=True)
+            return positioned_path
+        except Exception as exc:
+            logger.warning("图形 SVG 定位预处理失败，按原坐标插入 %s: %s", svg_file.name, exc)
+            return svg_file
+
+    @staticmethod
+    def _svg_view_box(root) -> tuple[float, float, float, float]:
+        """解析 SVG 的 viewBox；缺失时回退 width/height。"""
+        view_box = (root.get("viewBox") or "").replace(",", " ").split()
+        if len(view_box) == 4:
+            try:
+                return tuple(float(v) for v in view_box)
+            except ValueError:
+                pass
+
+        def _num(value: str | None) -> float:
+            if not value:
+                return 0.0
+            match = re.match(r"[-\d.]+", str(value).strip())
+            return float(match.group(0)) if match else 0.0
+
+        width = _num(root.get("width"))
+        height = _num(root.get("height"))
+        if width > 0 and height > 0:
+            return (0.0, 0.0, width, height)
+        return (0.0, 0.0, 0.0, 0.0)
 
     def _find_max_shape_id(self, presentation: Presentation) -> int:
         """找到所有 slide 中最大的 shape ID。"""

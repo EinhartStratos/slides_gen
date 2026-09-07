@@ -24,6 +24,7 @@ def build_structured_system_prompt(check_rules_text: str = "", page_generation_r
         "模板中的说明文字、填写说明、示例文案只可作为理解页面用途的参考，不能直接照抄到最终结果。"
         "正文内容应尽量压缩为可展示的要点，而不是把需求全文整段搬运进页面。"
         "如果某个元素只是模板说明占位，且当前需求不足以生成真实内容，可以省略该元素。"
+        "文本元素的 content 只能输出自然语言正文，禁止输出 SVG、XML、HTML 等任何代码或标记。"
         "禁止输出 Markdown 解释、禁止输出代码围栏、禁止输出额外说明。"
     )
     if check_rules_text:

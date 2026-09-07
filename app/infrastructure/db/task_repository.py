@@ -69,22 +69,48 @@ class TaskRepository:
         sql = "SELECT * FROM sg_generation_task WHERE task_id = %s AND api_key = %s LIMIT 1"
         return self.db.fetch_one(sql, (task_id, api_key))
 
-    def list_tasks(self, api_key: str, status: str | None, offset: int, limit: int) -> list[dict[str, Any]]:
+    def list_tasks(
+        self,
+        api_key: str,
+        status: str | None,
+        offset: int,
+        limit: int,
+        generation_id: str | None = None,
+        task_type: str | None = None,
+    ) -> list[dict[str, Any]]:
         sql = "SELECT * FROM sg_generation_task WHERE api_key = %s"
         params: list[Any] = [api_key]
         if status:
             sql += " AND status = %s"
             params.append(status)
+        if generation_id:
+            sql += " AND generation_id = %s"
+            params.append(generation_id)
+        if task_type:
+            sql += " AND task_type = %s"
+            params.append(task_type)
         sql += " ORDER BY created_at DESC LIMIT %s OFFSET %s"
         params.extend([limit, offset])
         return self.db.fetch_all(sql, tuple(params))
 
-    def list_task_ids(self, api_key: str, status: str | None) -> list[dict[str, Any]]:
+    def list_task_ids(
+        self,
+        api_key: str,
+        status: str | None,
+        generation_id: str | None = None,
+        task_type: str | None = None,
+    ) -> list[dict[str, Any]]:
         sql = "SELECT task_id FROM sg_generation_task WHERE api_key = %s"
         params: list[Any] = [api_key]
         if status:
             sql += " AND status = %s"
             params.append(status)
+        if generation_id:
+            sql += " AND generation_id = %s"
+            params.append(generation_id)
+        if task_type:
+            sql += " AND task_type = %s"
+            params.append(task_type)
         sql += " ORDER BY created_at DESC"
         return self.db.fetch_all(sql, tuple(params))
 

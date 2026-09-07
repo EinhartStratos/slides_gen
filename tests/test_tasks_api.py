@@ -78,6 +78,22 @@ class TestListTasks:
         assert len(data) >= 1
         assert "task_id" in data[0]
         assert "status" in data[0]
+        # 新增字段：区分旧流程与 v4 拆分流程
+        assert "task_type" in data[0]
+        assert "generation_id" in data[0]
+
+    def test_list_tasks_filter_by_task_type(self, client, auth_headers, curl_data):
+        """按 task_type 过滤：POST /tasks 创建的是 legacy 任务"""
+        client.post("/api/v1/tasks", json=curl_data, headers=auth_headers)
+        resp = client.get("/api/v1/tasks?task_type=legacy", headers=auth_headers)
+        assert resp.status_code == 200
+        data = resp.json()["data"]
+        assert len(data) >= 1
+        assert all(item["task_type"] == "legacy" for item in data)
+
+        resp = client.get("/api/v1/tasks?task_type=body", headers=auth_headers)
+        assert resp.status_code == 200
+        assert resp.json()["data"] == []
 
     def test_list_tasks_ids_only(self, client, auth_headers, curl_data):
         """ids_only=true 应只返回 task_id 列表"""

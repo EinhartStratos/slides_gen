@@ -74,6 +74,9 @@ PAGE_TYPE_CONTENT = "content"
 PAGE_TYPE_DIAGRAM = "diagram"
 PAGE_TYPE_END = "end"
 
+# 必须原样保留的页面类型：目录页、致谢页直接复制模板页，不经过 LLM 改写
+TEMPLATE_COPY_PAGE_TYPES = {PAGE_TYPE_TOC, PAGE_TYPE_END}
+
 # v4 校验状态
 VALIDATION_STATUS_PENDING = "pending"
 VALIDATION_STATUS_PASSED = "passed"
