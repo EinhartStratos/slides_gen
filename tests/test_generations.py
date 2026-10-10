@@ -4,6 +4,26 @@ from __future__ import annotations
 import time
 
 
+def _wait_generation(client, auth_headers, generation_id, predicate, timeout=120):
+    """轮询 generation 汇总状态，predicate 命中即返回 summary。
+
+    generation 到达终态（completed/failed 等）而 predicate 未命中时提前返回，
+    避免在已失败的任务上空等到超时；超时则带着最后一次快照报错。
+    """
+    terminal = {"completed", "completed_with_warnings", "failed", "cancelled"}
+    summary: dict = {}
+    for _ in range(timeout):
+        resp = client.get(f"/api/v1/generations/{generation_id}", headers=auth_headers)
+        assert resp.status_code == 200
+        summary = resp.json()["data"]
+        if predicate(summary):
+            return summary
+        if summary["status"] in terminal:
+            return summary
+        time.sleep(1)
+    raise AssertionError(f"generation 未在 {timeout} 秒内完成: {summary}")
+
+
 class TestGenerationEndpoints:
     """测试 /api/v1/generations 系列接口"""
 
@@ -54,20 +74,12 @@ class TestGenerationEndpoints:
         assert data["body_task_id"].startswith("task_")
         assert data["diagram_task_id"].startswith("task_")
 
-        # 等待后台任务完成（mock LLM 较快，最多 30 秒）
+        # 等待后台任务完成（CI 上共享 runner 较慢，预算放宽到 120 秒）
         generation_id = data["generation_id"]
-        for _ in range(30):
-            resp = client_with_mock_llm.get(
-                f"/api/v1/generations/{generation_id}",
-                headers=auth_headers,
-            )
-            assert resp.status_code == 200
-            summary = resp.json()["data"]
-            if summary["status"] == "completed":
-                break
-            time.sleep(1)
-        else:
-            raise AssertionError("generation 未在 30 秒内完成")
+        summary = _wait_generation(
+            client_with_mock_llm, auth_headers, generation_id,
+            lambda s: s["status"] == "completed",
+        )
 
         assert summary["body_status"] == "completed"
         assert summary["diagram_status"] == "completed"
@@ -99,17 +111,10 @@ class TestGenerationEndpoints:
         )
         generation_id = data["generation_id"]
 
-        for _ in range(30):
-            resp = client_with_mock_llm.get(
-                f"/api/v1/generations/{generation_id}",
-                headers=auth_headers,
-            )
-            summary = resp.json()["data"]
-            if summary["body_status"] == "completed":
-                break
-            time.sleep(1)
-        else:
-            raise AssertionError("body 任务未在 30 秒内完成")
+        summary = _wait_generation(
+            client_with_mock_llm, auth_headers, generation_id,
+            lambda s: s["body_status"] == "completed",
+        )
 
         # compose 未请求时，正文产物已可下载
         assert summary["compose_status"] == "not_requested"
@@ -141,17 +146,10 @@ class TestGenerationEndpoints:
         data = self._create_generation(client_with_mock_llm, auth_headers, payload)
         generation_id = data["generation_id"]
 
-        for _ in range(30):
-            resp = client_with_mock_llm.get(
-                f"/api/v1/generations/{generation_id}",
-                headers=auth_headers,
-            )
-            summary = resp.json()["data"]
-            if summary["body_status"] == "completed" and summary["diagram_status"] == "completed":
-                break
-            time.sleep(1)
-        else:
-            raise AssertionError("body/diagrams 任务未在 30 秒内完成")
+        summary = _wait_generation(
+            client_with_mock_llm, auth_headers, generation_id,
+            lambda s: s["body_status"] == "completed" and s["diagram_status"] == "completed",
+        )
 
         resp = client_with_mock_llm.get(
             f"/api/v1/tasks?generation_id={generation_id}",
@@ -241,17 +239,10 @@ class TestGenerationEndpoints:
         data = self._create_generation(client_with_mock_llm, auth_headers, payload)
         generation_id = data["generation_id"]
 
-        for _ in range(30):
-            resp = client_with_mock_llm.get(
-                f"/api/v1/generations/{generation_id}",
-                headers=auth_headers,
-            )
-            summary = resp.json()["data"]
-            if summary["diagram_status"] == "completed":
-                break
-            time.sleep(1)
-        else:
-            raise AssertionError("diagrams 任务未在 30 秒内完成")
+        summary = _wait_generation(
+            client_with_mock_llm, auth_headers, generation_id,
+            lambda s: s["diagram_status"] == "completed",
+        )
 
         # 列出图形
         resp = client_with_mock_llm.get(
