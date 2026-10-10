@@ -982,7 +982,18 @@ GenerationRequest（generation_id）
 
 #### `GET /api/v1/generations/{generation_id}`
 
-返回输入概要、三个任务状态和可下载产物，不返回完整 `requirement_text`。
+返回输入概要、三个子任务的**实时**状态/进度和可下载产物地址，不返回完整 `requirement_text`。
+
+> 子任务状态与进度直接读取任务表实时值（不依赖聚合刷新）：`body` 完成即可用 `body_download_url` 下载，`diagrams` 同理，无需等待 `compose` 结束。
+
+| 字段 | 说明 |
+|---|---|
+| `body_status` / `diagram_status` / `compose_status` | 子任务实时状态；未创建的任务为 `not_requested` |
+| `body_progress` / `diagram_progress` / `compose_progress` | 子任务实时进度（0-100）；任务不存在时为 `null` |
+| `body_download_url` | 正文 PPTX 下载地址（body 产物生成后立即可用，否则为 `null`） |
+| `diagrams_download_url` | 全部图形 SVG 打包 zip 下载地址（已有图形即可下载，无图形时为 `null`） |
+| `composed_download_url` | 组装 PPTX 下载地址（compose 产物生成后可用，否则为 `null`） |
+| `has_body_download` / `has_diagram_downloads` / `has_composed_download` | 对应产物是否已就绪 |
 
 #### 响应示例：部分图形失败但已完成组装
 
@@ -997,39 +1008,29 @@ GenerationRequest（generation_id）
     "auto_compose": true,
     "template_id": "tpl_20260627132835_bce99ff8",
     "requirement_text_chars": 62840,
-    "warnings": [
-      {
-        "code": "DIAGRAM_PARTIAL_FAILURE",
-        "message": "共规划3个图形，2个成功，1个失败"
-      }
-    ],
+    "requirement_text_warning": true,
     "body_task_id": "task_body_20260901103000_1111",
     "diagram_task_id": "task_diagram_20260901103000_2222",
     "compose_task_id": "task_compose_20260901103600_4444",
     "body_status": "completed",
     "diagram_status": "completed_with_warnings",
     "compose_status": "completed_with_warnings",
+    "body_progress": 100.0,
+    "diagram_progress": 100.0,
+    "compose_progress": 100.0,
     "kept_page_count": 16,
     "skipped_page_count": 32,
     "diagram_count": 3,
-    "diagram_completed_count": 2,
-    "diagram_failed_count": 1,
-    "artifacts": {
-      "body_pptx": {
-        "artifact_id": "art_body_001",
-        "file_name": "信息披露优化方案_body.pptx",
-        "download_url": "/api/v1/tasks/task_body_20260901103000_1111/artifacts/art_body_001/download"
-      },
-      "composed_pptx": {
-        "artifact_id": "art_compose_001",
-        "file_name": "信息披露优化方案.pptx",
-        "download_url": "/api/v1/tasks/task_compose_20260901103600_4444/artifacts/art_compose_001/download"
-      },
-      "diagram_manifest": {
-        "artifact_id": "art_diagram_manifest_001",
-        "download_url": "/api/v1/tasks/task_diagram_20260901103000_2222/artifacts/art_diagram_manifest_001/download"
-      }
-    },
+    "body_pptx_artifact_id": "art_body_001",
+    "composed_pptx_artifact_id": "art_compose_001",
+    "has_body_download": true,
+    "has_diagram_downloads": true,
+    "has_composed_download": true,
+    "body_download_url": "/api/v1/generations/gen_20260901103000_a1b2c3d4/body/download",
+    "diagrams_download_url": "/api/v1/generations/gen_20260901103000_a1b2c3d4/diagrams/download",
+    "composed_download_url": "/api/v1/tasks/task_compose_20260901103600_4444/artifacts/art_compose_001/download",
+    "warning_message": "共规划3个图形，2个成功，1个失败",
+    "error_message": null,
     "created_at": "2026-09-01T10:30:00",
     "completed_at": "2026-09-01T10:38:20"
   }

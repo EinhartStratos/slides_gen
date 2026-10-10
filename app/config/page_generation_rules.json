@@ -5,59 +5,106 @@
       "id": "global_page_rule_001",
       "enabled": true,
       "description": "封面页填写规范",
-      "template_scope": ["*"],
+      "template_scope": [
+        "*"
+      ],
       "title_match": {
         "mode": "any_contains",
-        "keywords": ["封面", "项目技术方案汇报", "项目技术方案"],
+        "keywords": [
+          "封面",
+          "项目技术方案汇报",
+          "项目技术方案"
+        ],
         "normalize_whitespace": true,
-        "ignore_suffixes": ["（续）", "(续)"]
+        "ignore_suffixes": [
+          "（续）",
+          "(续)"
+        ]
       },
-      "apply_to": ["planning", "body"],
-      "instruction": "封面必须生成。从需求文本中提取：项目名称（通常出现在需求书首页或工作量估算书“需求项”中）、需求编号（如 FR-2026XX-XXXXX 格式）、汇报部门（主办部门或软件中心牵头部门）、汇报时间（当前月份或需求书签署日期）。文档编号按“需求编号_SP_01”格式填写。未明确的字段保留模板占位符或留空，禁止编造。",
+      "apply_to": [
+        "planning",
+        "body"
+      ],
+      "instruction": "封面必须生成。从需求文本中提取：项目名称（通常出现在需求书首页或工作量估算书“需求项”中）、需求编号（如 FR-2026XX-XXXXX 格式）、汇报部门（主办部门或软件中心牵头部门）、汇报时间（当前月份或需求书签署日期）。文档编号按“需求编号_SP_01”格式填写；需求编号无法确定时，删除整条“需求编号_SP_01”占位前缀，不得残留“需求编号_SP_”碎片。未明确的字段保留模板占位符或留空，禁止编造。",
       "priority": 100
     },
     {
       "id": "global_page_rule_002",
       "enabled": true,
       "description": "目录页填写规范",
-      "template_scope": ["*"],
+      "template_scope": [
+        "*"
+      ],
       "title_match": {
         "mode": "any_contains",
-        "keywords": ["目录", "CONTENTS"],
+        "keywords": [
+          "目录",
+          "CONTENTS"
+        ],
         "normalize_whitespace": true,
-        "ignore_suffixes": ["（续）", "(续)"]
+        "ignore_suffixes": [
+          "（续）",
+          "(续)"
+        ]
       },
-      "apply_to": ["planning", "body"],
-      "instruction": "目录页必须生成。只保留输入材料中实际会出现的章节（需求及现状分析、工作量及实施计划、待决策事项等）。不得添加未在输入中体现的章节，也不得删除已有章节。章节标题与输入保持一致。如果该页是分节目录（如技术方案目录），只列出本节包含的后续页面。",
+      "apply_to": [
+        "planning",
+        "body"
+      ],
+      "instruction": "目录页为固定页：任何情况下原样输出模板章节结构，不经 LLM 改写、不随章节缺失而调整、不删除。（本规则仅作说明，目录页实际走模板原样复制通道，不会进入生成流程。）",
       "priority": 100
     },
     {
       "id": "global_page_rule_003",
       "enabled": true,
       "description": "结尾页填写规范",
-      "template_scope": ["*"],
+      "template_scope": [
+        "*"
+      ],
       "title_match": {
         "mode": "any_contains",
-        "keywords": ["谢谢", "感谢", "结束", "尾页", "敬请指正"],
+        "keywords": [
+          "谢谢",
+          "感谢",
+          "结束",
+          "尾页",
+          "敬请指正"
+        ],
         "normalize_whitespace": true,
-        "ignore_suffixes": ["（续）", "(续)"]
+        "ignore_suffixes": [
+          "（续）",
+          "(续)"
+        ]
       },
-      "apply_to": ["planning", "body"],
-      "instruction": "结尾页必须生成。填写统一的感谢语，如“感谢聆听，敬请指正！”。不要编造输入中没有的联系方式、汇报人或机构。",
+      "apply_to": [
+        "planning",
+        "body"
+      ],
+      "instruction": "结尾页为固定页：任何情况下原样输出模板致谢页，不经 LLM 改写、不删除。（本规则仅作说明，尾页实际走模板原样复制通道，不会进入生成流程。）",
       "priority": 100
     },
     {
       "id": "global_page_rule_004",
       "enabled": true,
       "description": "分级分类评审触发条件填写规范",
-      "template_scope": ["*"],
+      "template_scope": [
+        "*"
+      ],
       "title_match": {
         "mode": "any_contains",
-        "keywords": ["分级分类评审触发条件"],
+        "keywords": [
+          "分级分类评审触发条件"
+        ],
         "normalize_whitespace": true,
-        "ignore_suffixes": ["（续）", "(续)"]
+        "ignore_suffixes": [
+          "（续）",
+          "(续)"
+        ]
       },
-      "apply_to": ["planning", "body"],
+      "apply_to": [
+        "planning",
+        "body"
+      ],
       "instruction": "该页必须生成。评审级别根据项目总工作量和涉及改造系统范围判断：\n1. 从“工作量估算书”或“功能点估算明细”中提取项目总工作量（人天/人年）；\n2. 从需求文本提取涉及改造/配合测试的产品数量和跨部门情况；\n3. 如果总工作量小于10人年、不涉及新增资源、不涉及架构调整，通常为“申请部门级评审”；\n4. 重点请示或关注事项：有则列出，无则填写“不涉及”。\n如果标题还包含“方案变更”，需说明本次方案变更后的评审级别与变更前对比。",
       "priority": 60
     },
@@ -65,14 +112,24 @@
       "id": "global_page_rule_005",
       "enabled": true,
       "description": "方案变更相关页填写规范",
-      "template_scope": ["*"],
+      "template_scope": [
+        "*"
+      ],
       "title_match": {
         "mode": "any_contains",
-        "keywords": ["方案变更说明"],
+        "keywords": [
+          "方案变更说明"
+        ],
         "normalize_whitespace": true,
-        "ignore_suffixes": ["（续）", "(续)"]
+        "ignore_suffixes": [
+          "（续）",
+          "(续)"
+        ]
       },
-      "apply_to": ["planning", "body"],
+      "apply_to": [
+        "planning",
+        "body"
+      ],
       "instruction": "仅在需求文本中明确说明“方案变更”时生成。内容分四段：\n1. 方案变更原因：业务或技术原因；\n2. 技术方案变更说明：变更影响哪些系统、主要改造变化点、配合测试范围变化；\n3. 工作量变化说明：如有变化，逐项说明并给出总工作量/预算变化；\n4. 实施计划变化与项目间关联风险：如有变化，说明阶段时间变化及是否影响最终投产。\n如未提及方案变更，该页应跳过。",
       "priority": 60
     },
@@ -80,29 +137,49 @@
       "id": "global_page_rule_006",
       "enabled": true,
       "description": "项目基本信息填写规范",
-      "template_scope": ["*"],
+      "template_scope": [
+        "*"
+      ],
       "title_match": {
         "mode": "any_contains",
-        "keywords": ["项目基本信息"],
+        "keywords": [
+          "项目基本信息"
+        ],
         "normalize_whitespace": true,
-        "ignore_suffixes": ["（续）", "(续)"]
+        "ignore_suffixes": [
+          "（续）",
+          "(续)"
+        ]
       },
-      "apply_to": ["planning", "body"],
-      "instruction": "该页必须生成。从需求书首页/需求意向中提取：项目名称、项目类型（默认不勾选“紧急项目/战略项目”，除非文本明确）、项目牵头业务部门、项目牵头研发部门、软件中心牵头总经理室成员、软件中心项目经理。业务目标从“需求简述”中按条目化提炼，控制在3-5条，不得照抄模板示例。没有明确依据的字段留空。",
+      "apply_to": [
+        "planning",
+        "body"
+      ],
+      "instruction": "该页必须生成。字段与来源：项目名称（需求书首页）；项目类型（应用项目情况说明的“项目类别”，常规/战略/敏态/紧急，未明确默认常规且不勾选紧急/战略）；项目牵头业务部门（需求书“主办部门”或情况说明“需求提出部门”）；项目牵头研发部门（工作量明细中改造类主产品的“实施部门”，或预评估表“部门”列中主改造产品对应部门）；软件中心项目经理（主产品的“产品联系人”或预评估“联系人”列）；软件中心牵头总经理室成员（仅当输入明确出现时填写，否则留空）。业务目标从情况说明“项目整体定位及业务目标”或“需求简述”中按条目化提炼，控制在3-5条，不得照抄模板示例。没有明确依据的字段留空，禁止编造。",
       "priority": 70
     },
     {
       "id": "global_page_rule_007",
       "enabled": true,
       "description": "需求背景填写规范",
-      "template_scope": ["*"],
+      "template_scope": [
+        "*"
+      ],
       "title_match": {
         "mode": "any_contains",
-        "keywords": ["需求背景"],
+        "keywords": [
+          "需求背景"
+        ],
         "normalize_whitespace": true,
-        "ignore_suffixes": ["（续）", "(续)"]
+        "ignore_suffixes": [
+          "（续）",
+          "(续)"
+        ]
       },
-      "apply_to": ["planning", "body"],
+      "apply_to": [
+        "planning",
+        "body"
+      ],
       "instruction": "该页必须生成。从需求文本的“需求背景/1.1需求背景”中提炼：\n1. 业务驱动（监管要求、业务发展、市场压力等）；\n2. 本次需求要解决的问题；\n3. 服务对象、覆盖机构、渠道变化（如有）；\n4. 满足需求后的业务影响。\n输出一段简洁文字，不要整段复制需求原文，控制在200字以内。如果需求文本没有背景描述，应跳过该页。",
       "example": "根据监管要求及业务需要，需完善不良资产处置线上审批功能，提升我行不良资产处置的自动化、系统化水平。",
       "priority": 70
@@ -111,29 +188,49 @@
       "id": "global_page_rule_008",
       "enabled": true,
       "description": "需求概述填写规范",
-      "template_scope": ["*"],
+      "template_scope": [
+        "*"
+      ],
       "title_match": {
         "mode": "any_contains",
-        "keywords": ["需求概述"],
+        "keywords": [
+          "需求概述"
+        ],
         "normalize_whitespace": true,
-        "ignore_suffixes": ["（续）", "(续)"]
+        "ignore_suffixes": [
+          "（续）",
+          "(续)"
+        ]
       },
-      "apply_to": ["planning", "body"],
-      "instruction": "该页通常必须生成，使用模板表格填充。表格列一般为：序号、需求类别、需求项、描述。按以下规则提取：\n1. 需求类别只能是“功能性需求/非功能性需求/数据需求/公共业务能力接入”等输入中实际存在的类别；\n2. 需求项从“功能点估算明细”或“需求简述”中提炼，如“需求项1：XXX”；\n3. 描述对该需求项要点按条目概括，不要照抄模板示例；\n4. 不涉及的类别整行删除，不要保留“XXX”等占位符。\n如果需求文本完全没有可提炼的需求项，该页跳过。",
+      "apply_to": [
+        "planning",
+        "body"
+      ],
+      "instruction": "该页通常必须生成，内容多时可分多页（系统自动复制版式续页），不要为塞进一页而压缩删减需求项。按模板表格逐行填写：需求项按“需求项清单”逐行列出、一项一行，不得合并多项为一行。“需求类别”列的取值必须从该表格模板 default_cells 中已出现的取值中选择（如“业务需求/公共业务能力接入/业务功能整合/业务数据需求/技术数据需求”），禁止自拟类别（尤其禁止把“功能性需求”当类别值）；需求项名带“（功能类）”后缀的一律归为“业务需求”。描述对该需求项要点按条目概括，不涉及的表格/类别整行删除，不要保留占位符。如果需求文本完全没有可提炼的需求项，该页跳过。",
       "priority": 70
     },
     {
       "id": "global_page_rule_009",
       "enabled": true,
       "description": "现状分析填写规范",
-      "template_scope": ["*"],
+      "template_scope": [
+        "*"
+      ],
       "title_match": {
         "mode": "any_contains",
-        "keywords": ["现状分析"],
+        "keywords": [
+          "现状分析"
+        ],
         "normalize_whitespace": true,
-        "ignore_suffixes": ["（续）", "(续)"]
+        "ignore_suffixes": [
+          "（续）",
+          "(续)"
+        ]
       },
-      "apply_to": ["planning", "body"],
+      "apply_to": [
+        "planning",
+        "body"
+      ],
       "instruction": "该页必须生成。分为两部分：\n1. 业务现状分析：从需求文本“业务流程/业务现状”中提取当前处理过程、涉及角色和规则，按条目列出；如仅涉及功能优化且未改变业务流程，可写“本次不涉及业务流程变化”。\n2. 系统现状分析：从需求文本“系统现状/涉及核心系统要求”中提取各相关系统（如 CCMS-G、BOCS-D 等）的现状定位、现有功能、与本项目的关系，按系统分点说明。\n不要编造需求中未提及的系统。",
       "example": "1、业务现状分析\n目前对公不良资产处置已有完整的系统功能支持，根据不良资产处置审批机制优化方案需要调整优化现有的功能以满足业务管理要求，主要的功能优化包括增加线上信管委功能，对信管委权限内项目改为由资处会、信管委按权限一次上会、一次审议等，同时解决分行在系统使用中的问题，对特殊资产经营管理模块中涉及核销、批量转让及资处会等相关功能进行优化。\n2、系统现状分析\nCCMS-G：在对公业务的贷后管理环节，PC端主要由CCMS系统的特殊资产模块实现客户不良资产接收、基本信息维护、日常过程管理、清收处置及审核、清收化解自动生成及审核、资产撮合等各清收处置关键环节的全面覆盖和全生命周期的数据记录。此次是根据业务最新的制度要求，对PC端和移动端相关功能进行升级改造，以满足业务最新的管理要求。",
       "priority": 70
@@ -142,14 +239,24 @@
       "id": "global_page_rule_010",
       "enabled": true,
       "description": "假设和约束填写规范",
-      "template_scope": ["*"],
+      "template_scope": [
+        "*"
+      ],
       "title_match": {
         "mode": "any_contains",
-        "keywords": ["假设和约束"],
+        "keywords": [
+          "假设和约束"
+        ],
         "normalize_whitespace": true,
-        "ignore_suffixes": ["（续）", "(续)"]
+        "ignore_suffixes": [
+          "（续）",
+          "(续)"
+        ]
       },
-      "apply_to": ["planning", "body"],
+      "apply_to": [
+        "planning",
+        "body"
+      ],
       "instruction": "如果需求文本中有明确的假设（如业务前提）或约束（如上线窗口、关联项目依赖、系统下线影响），按条目列出。如果没有，正文填写“不涉及”。禁止编造。",
       "example": "不涉及",
       "priority": 70
@@ -158,14 +265,24 @@
       "id": "global_page_rule_011",
       "enabled": true,
       "description": "项目方案概述填写规范",
-      "template_scope": ["*"],
+      "template_scope": [
+        "*"
+      ],
       "title_match": {
         "mode": "any_contains",
-        "keywords": ["项目方案概述"],
+        "keywords": [
+          "项目方案概述"
+        ],
         "normalize_whitespace": true,
-        "ignore_suffixes": ["（续）", "(续)"]
+        "ignore_suffixes": [
+          "（续）",
+          "(续)"
+        ]
       },
-      "apply_to": ["planning", "body"],
+      "apply_to": [
+        "planning",
+        "body"
+      ],
       "instruction": "该页必须生成。结构固定为：\n（一）总述：是否涉及系统架构调整、资源调整；\n（二）软件中心：本项目涉及的开发改造产品和配合测试产品，按“本产品改造内容 + 涉及配合测试产品”格式列出；\n（三）中银金科：有则列出，无则“不涉及”；\n（四）外包厂商：有则列出，无则“不涉及”。\n产品名称严格使用需求文本/功能点/工作量估算书中出现的英文简称，不得编造。",
       "example": "（一）总述\n本次方案不涉及系统架构调整，不涉及资源调整。\n（二）软件中心\n本项目由CCMS-G产品特殊资产模块、流程中心改造，对现有不良资产处置PC端及行家移动端功能的页面及审批流程的重构，涉及C-EAM、S-CSMP、T-DIMS、AC-MWE、T-ESIP-M、S-EMM、S-EIA产品配合测试。\n（三）中银金科\n不涉及。\n（四）外包厂商\n不涉及。",
       "priority": 70
@@ -174,14 +291,25 @@
       "id": "global_page_rule_012",
       "enabled": true,
       "description": "项目整体架构图及说明填写规范",
-      "template_scope": ["*"],
+      "template_scope": [
+        "*"
+      ],
       "title_match": {
         "mode": "any_contains",
-        "keywords": ["项目整体架构图"],
+        "keywords": [
+          "项目整体架构图"
+        ],
         "normalize_whitespace": true,
-        "ignore_suffixes": ["（续）", "(续)"]
+        "ignore_suffixes": [
+          "（续）",
+          "(续)"
+        ]
       },
-      "apply_to": ["planning", "body", "diagram"],
+      "apply_to": [
+        "planning",
+        "body",
+        "diagram"
+      ],
       "instruction": "该页为 diagram。先判断：如果需求文本明确说明“不涉及架构调整、不涉及新增链路”，则文字说明中必须保留此结论，并仅描述现有连接关系；如果涉及新增或变更，则重点描述变化点。\n架构图绘制规则：\n1. 产品/系统用矩形表示，需改造的产品填充浅红色#ffcccc，仅配合测试的产品无填充/灰色；\n2. 渠道→业务→平台→后线从左到右分区排列；\n3. 联机接口用蓝色实线箭头并标注接口形式（http/IPS-D等），批量接口用深灰虚线箭头；\n4. 本次新增/变更关系用红色线条并标注“新增”；\n5. 只输出完整<svg>，背景透明，viewBox 0 0 900 320。\n若需求中无系统/接口信息，应跳过该页。",
       "example": "架构图说明：本方案不涉及架构调整，新增功能不涉及新增链路。现有连接说明如下：\n1、CCMS-G仍通过请求S-CSMP联机接口实现对商密三级字段的加密存储；\n2、CCMS-G仍通过请求T-DIMS联机接口实现审批流程中的影像上传与查询；\n3、行家工作台的智能风控CCMS-G的H5应用用于支持行业业务人员访问；\n4、行家工作台的智能风控应用通过访问S-EIA、C-EAM进行菜单及权限的控制。",
       "priority": 60
@@ -190,14 +318,24 @@
       "id": "global_page_rule_013",
       "enabled": true,
       "description": "主要处理流程填写规范",
-      "template_scope": ["*"],
+      "template_scope": [
+        "*"
+      ],
       "title_match": {
         "mode": "any_contains",
-        "keywords": ["主要处理流程"],
+        "keywords": [
+          "主要处理流程"
+        ],
         "normalize_whitespace": true,
-        "ignore_suffixes": ["（续）", "(续)"]
+        "ignore_suffixes": [
+          "（续）",
+          "(续)"
+        ]
       },
-      "apply_to": ["planning", "body"],
+      "apply_to": [
+        "planning",
+        "body"
+      ],
       "instruction": "如果需求文本中有明确的业务处理流程、审批流程或调用时序，则保留并生成；否则跳过。\n输出方式：\n1. 如标题含“流程图/时序图”，page_type 设为 diagram，使用 SVG 绘制角色/系统交互流程；\n2. 否则使用条目化文字描述流程阶段，每个阶段说明处理人/系统、操作、流转条件。\n流程中的角色、步骤、顺序必须与输入完全一致，禁止补全未提及的步骤。",
       "example": "流程说明：核销流程、债权转让两类不良资产处置流程按照最新审批要求进行重构：\n1、按照一级分行权限、总行资处会权限、总行信管委权限、总行信管委以上权限四类权限进行流程流转控制；\n2、一级分行权限项目新增支持一级行发起、二级分行风险部/授管部发起；\n3、对于总行信管委及以上权限在总行派单前新增报告拟稿、核稿、签发环节，在总行尽责审批后增加总行信管委会环节。",
       "priority": 60
@@ -206,15 +344,25 @@
       "id": "global_page_rule_014",
       "enabled": true,
       "description": "项目方案要点填写规范",
-      "template_scope": ["*"],
+      "template_scope": [
+        "*"
+      ],
       "title_match": {
         "mode": "any_contains",
-        "keywords": ["项目方案要点"],
+        "keywords": [
+          "项目方案要点"
+        ],
         "normalize_whitespace": true,
-        "ignore_suffixes": ["（续）", "(续)"]
+        "ignore_suffixes": [
+          "（续）",
+          "(续)"
+        ]
       },
-      "apply_to": ["planning", "body"],
-      "instruction": "该页经常需要多页连续生成。按以下结构组织：\n一、功能性需求方案要点；\n二、非功能性需求方案要点；\n三、数据需求方案要点。\n对于每个需求项，从“功能点估算明细/工作量估算书”的“需求项”列中分组，列出：\n1. 需求项名称与类型（功能类/流程类）；\n2. 改造产品（使用英文简称）；\n3. 主要改造点，条目化、简洁；\n4. 涉及配合测试的产品。\n如果某类需求不涉及，直接写“不涉及”并删除对应大段。如果完全没有可对应需求项，跳过该页。",
+      "apply_to": [
+        "planning",
+        "body"
+      ],
+      "instruction": "该页经常需要多页连续生成，内容多时不要压缩删减，由系统自动复制版式续页。按需求项逐条组织，与“需求项清单”顺序、数量一致。优先依据预评估表（其“需求项→涉及产品→工作说明”即业务级要点），其次情况说明“功能详细介绍”、需求书功能描述章；功能点明细仅作兜底参考，不要抄其接口级描述。每个需求项固定输出：1. 需求项名称与类型（功能类/流程类）；2. 改造产品（英文简称，取版本情况=有版本/改造的行）；3. 主要改造点（业务级条目，源自“工作说明”列，条目化简洁）；4. 涉及配合测试的产品（版本情况=配合测试的行）。如果完全没有可对应需求项，跳过该页。",
       "example": "一、功能性需求方案要点\n需求项1：新增总行信管委功能(功能类)\nCCMS-G特殊资产管理模块、流程中心改造，新增总行信管委相关功能，具体改造内容如下：\n1、新增总行信管委会议功能菜单，包括上会项目池、待处理、附件管理、已处理、流程信息查询；\n2、新增总行信管委会议相关功能的权限、角色、权限角色关系，角色包括：信管委委员、信管委有权审批人、信管委签报拟稿、信管委签报核稿、信管委签报签发，涉及C-EAM配合测试；\n3、在现有不良处置流程中新增总行信管委会议环节。\n二、非功能需求方案要点\n需求项1：新增总行信管委功能(功能类)\nCCMS-G特殊资产模块对债权价值分析字段进行权限控制，加密存储与展示，涉及S-CSMP配合测试。\n三、数据需求方案要点\n不涉及。",
       "priority": 60
     },
@@ -222,14 +370,32 @@
       "id": "global_page_rule_015",
       "enabled": true,
       "description": "新建/架构调整系统系列页填写规范",
-      "template_scope": ["*"],
+      "template_scope": [
+        "*"
+      ],
       "title_match": {
         "mode": "any_contains",
-        "keywords": ["基本信息", "应用架构", "数据架构", "技术架构", "安全架构", "单元化", "运维监控", "仿真验证", "投产切换"],
+        "keywords": [
+          "基本信息",
+          "应用架构",
+          "数据架构",
+          "技术架构",
+          "安全架构",
+          "单元化",
+          "运维监控",
+          "仿真验证",
+          "投产切换"
+        ],
         "normalize_whitespace": true,
-        "ignore_suffixes": ["（续）", "(续)"]
+        "ignore_suffixes": [
+          "（续）",
+          "(续)"
+        ]
       },
-      "apply_to": ["planning", "body"],
+      "apply_to": [
+        "planning",
+        "body"
+      ],
       "instruction": "仅在需求文本中明确提到“新建系统”或“架构调整”时生成。根据标题判断具体小节：\n- 基本信息：系统定位、边界、业务主管部门等；\n- 应用架构：内部逻辑与周边系统关系、实施策略；\n- 数据架构：数据分布、存储、流转、迁移；\n- 技术架构：技术栈、高可用、逻辑部署；\n- 安全架构：业务/应用/数据安全方案；\n- 仿真验证/投产切换/单元化/运维监控：按标题提取对应内容。\n没有调整点的项填写“不涉及”。如需求完全未涉及新建或架构调整，跳过该页。",
       "priority": 60
     },
@@ -237,14 +403,26 @@
       "id": "global_page_rule_016",
       "enabled": true,
       "description": "大模型/性能/测试页填写规范",
-      "template_scope": ["*"],
+      "template_scope": [
+        "*"
+      ],
       "title_match": {
         "mode": "any_contains",
-        "keywords": ["大模型", "性能指标", "测试结果"],
+        "keywords": [
+          "大模型",
+          "性能指标",
+          "测试结果"
+        ],
         "normalize_whitespace": true,
-        "ignore_suffixes": ["（续）", "(续)"]
+        "ignore_suffixes": [
+          "（续）",
+          "(续)"
+        ]
       },
-      "apply_to": ["planning", "body"],
+      "apply_to": [
+        "planning",
+        "body"
+      ],
       "instruction": "仅在需求文本中明确涉及大模型、GPU、性能指标或测试场景时生成。根据标题判断：\n- 含“大模型”：描述模型选择、测试场景、子场景与得分；\n- 含“性能指标”：列出业务用户数、并发请求量、首字时延、生成速率；\n- 含“测试结果”：给出结论与所需资源（如 A100 数量）。\n如输入中无相关描述，该页跳过。",
       "priority": 60
     },
@@ -252,45 +430,75 @@
       "id": "global_page_rule_017",
       "enabled": true,
       "description": "各系统工作说明及工作量填写规范",
-      "template_scope": ["*"],
+      "template_scope": [
+        "*"
+      ],
       "title_match": {
         "mode": "any_contains",
-        "keywords": ["各系统工作说明及工作量"],
+        "keywords": [
+          "各系统工作说明及工作量"
+        ],
         "normalize_whitespace": true,
-        "ignore_suffixes": ["（续）", "(续)"]
+        "ignore_suffixes": [
+          "（续）",
+          "(续)"
+        ]
       },
-      "apply_to": ["planning", "body"],
-      "instruction": "该页为表格。从“功能点估算明细”和“工作量估算书”中提取每个产品，按产品分组。表格列通常包括：应用系统英文简称、应用系统名称、实施类型（自主开发/合作开发/仅配合测试）、功能改造要点、非功能改造要点、数据需求改造要求。\n- 改造产品列出具体改造点；\n- 仅配合测试的产品可集中写为“配合测试：XX、YY”；\n- 涉外购/外包系统需单独说明。\n如工作量表中没有产品明细，跳过该页。",
+      "apply_to": [
+        "planning",
+        "body"
+      ],
+      "instruction": "该页为表格，行数必须等于“产品清单”中的产品数，**一个产品一行，禁止把多个产品合并为一行**（包括仅配合测试产品也不得合并）。表格列按模板：应用系统英文简称、应用系统名称、实施类型（新建/修改/配合测试）、功能改造要点、非功能改造要点、数据需求改造要求、工作量。实施类型映射：预评估/工作量表“版本情况=配合测试”→配合测试，其余→修改/新建。功能改造要点优先取预评估表该产品的“工作说明”列原文；工作量数值以提供的“产品清单”数据为准，禁止改动或留空。超容量自动拆页。如工作量表和预评估中都没有产品明细，跳过该页。",
       "priority": 60
     },
     {
       "id": "global_page_rule_018",
       "enabled": true,
       "description": "项目总工作量填写规范",
-      "template_scope": ["*"],
+      "template_scope": [
+        "*"
+      ],
       "title_match": {
         "mode": "any_contains",
-        "keywords": ["项目总工作量"],
+        "keywords": [
+          "项目总工作量"
+        ],
         "normalize_whitespace": true,
-        "ignore_suffixes": ["（续）", "(续)"]
+        "ignore_suffixes": [
+          "（续）",
+          "(续)"
+        ]
       },
-      "apply_to": ["planning", "body"],
-      "instruction": "该页为表格。表头通常为：类别、工作量（人年）、费用（万元）。从“工作量估算书”中汇总：\n- 自主实施：各产品自有工作量合计 ÷ 250（1人年=250人天）；\n- 对外支出：外包/厂商/外员费用合计；\n- 总计：项目总工作量。\n如未提供工作量数据，该页保留标题但正文注明“未提供”或直接跳过。",
+      "apply_to": [
+        "planning",
+        "body"
+      ],
+      "instruction": "该页为表格。表头通常为：类别、工作量（人年）、费用（万元）。工作量数值必须以输入中“项目总工作量/工作量明细（程序解析）”的汇总数字为准，禁止自行估算或修改；自主实施（人年）=自有工作量合计÷250，对外支出=外包/厂商工作量及费用合计，总计=项目总工作量。如未提供任何工作量数据，该页直接跳过，禁止编造数字。",
       "priority": 60
     },
     {
       "id": "global_page_rule_019",
       "enabled": true,
       "description": "项目实施计划填写规范",
-      "template_scope": ["*"],
+      "template_scope": [
+        "*"
+      ],
       "title_match": {
         "mode": "any_contains",
-        "keywords": ["项目实施计划"],
+        "keywords": [
+          "项目实施计划"
+        ],
         "normalize_whitespace": true,
-        "ignore_suffixes": ["（续）", "(续)"]
+        "ignore_suffixes": [
+          "（续）",
+          "(续)"
+        ]
       },
-      "apply_to": ["planning", "body"],
-      "instruction": "从工作量估算书或需求文本中提取：\n1. 项目实施周期（月）；\n2. 投产批次及每批次投产的需求项；\n3. 每批次涉及开发改造和配合测试的系统。\n按“202X年X月批次：完成需求项...（涉及X个系统开发改造，Y个系统配合测试）”格式列出。如未提供实施计划，该页跳过。",
+      "apply_to": [
+        "planning",
+        "body"
+      ],
+      "instruction": "优先依据预评估表“备注”列的批次可行性结论与情况说明“项目开发规划”，提取：1. 项目实施周期（月）；2. 投产批次及每批次投产的需求项；3. 每批次涉及开发改造和配合测试的系统；4. 无法按目标批次实施的系统及原因。按“202X年X月批次：完成需求项...（涉及X个系统开发改造，Y个系统配合测试）”格式列出。材料中完全没有批次/周期信息时该页跳过，**禁止按投产时间要求自行预估计划**。",
       "example": "项目实施周期6个月，计划在2026年12月分两个批次完成全部需求投产。\n2612批次：实现需求项1-4的功能投产，包括新增总行信管委功能、重构线上债权转让流程、优化线上核销流程、优化资处会功能，涉及1个系统开发改造（CCMS-G），3个系统配合测试（C-EAM、S-CSMP、T-DIMS）。\n26年12月独立批次：实现需求项5 移动端优化资处会、信管委功能，涉及1个系统开发改造（CCMS-G），6个系统配合测试（AC-MWE、T-ESIP-M、S-EMM、S-EIA、C-EAM、T-DIMS）。",
       "priority": 60
     },
@@ -298,14 +506,26 @@
       "id": "global_page_rule_020",
       "enabled": true,
       "description": "项目实施协同分析填写规范",
-      "template_scope": ["*"],
+      "template_scope": [
+        "*"
+      ],
       "title_match": {
         "mode": "any_contains",
-        "keywords": ["项目实施协同分析", "实施协同", "协同分析"],
+        "keywords": [
+          "项目实施协同分析",
+          "实施协同",
+          "协同分析"
+        ],
         "normalize_whitespace": true,
-        "ignore_suffixes": ["（续）", "(续)"]
+        "ignore_suffixes": [
+          "（续）",
+          "(续)"
+        ]
       },
-      "apply_to": ["planning", "body"],
+      "apply_to": [
+        "planning",
+        "body"
+      ],
       "instruction": "如果需求文本/工作量估算书中提到跨项目协同、依赖关系或风险，则按条目列出。如果没有明确内容，正文填写“不涉及”。",
       "priority": 70
     },
@@ -313,14 +533,26 @@
       "id": "global_page_rule_021",
       "enabled": true,
       "description": "与战略项目（产品信创）实施关系填写规范",
-      "template_scope": ["*"],
+      "template_scope": [
+        "*"
+      ],
       "title_match": {
         "mode": "any_contains",
-        "keywords": ["战略项目", "产品信创", "信创"],
+        "keywords": [
+          "战略项目",
+          "产品信创",
+          "信创"
+        ],
         "normalize_whitespace": true,
-        "ignore_suffixes": ["（续）", "(续)"]
+        "ignore_suffixes": [
+          "（续）",
+          "(续)"
+        ]
       },
-      "apply_to": ["planning", "body"],
+      "apply_to": [
+        "planning",
+        "body"
+      ],
       "instruction": "如果需求文本中未提及“产品信创”、“信创版本”或“战略项目”，该页应跳过或正文为空。如果有相关内容，按模板表格填写：实施分类、产品数量、产品名称、非信创/信创版本投产时间、新旧版本投产间隔等。",
       "priority": 70
     },
@@ -328,14 +560,24 @@
       "id": "global_page_rule_022",
       "enabled": true,
       "description": "待下线系统功能改造情况说明填写规范",
-      "template_scope": ["*"],
+      "template_scope": [
+        "*"
+      ],
       "title_match": {
         "mode": "any_contains",
-        "keywords": ["待下线"],
+        "keywords": [
+          "待下线"
+        ],
         "normalize_whitespace": true,
-        "ignore_suffixes": ["（续）", "(续)"]
+        "ignore_suffixes": [
+          "（续）",
+          "(续)"
+        ]
       },
-      "apply_to": ["planning", "body"],
+      "apply_to": [
+        "planning",
+        "body"
+      ],
       "instruction": "如果需求文本中未提及拟下线系统，正文填写“无”。如果有，按表格列出：应用系统英文简称、名称、实施类型、是否待下线、改造内容、改造原因、是否已通过决策。",
       "priority": 70
     },
@@ -343,14 +585,24 @@
       "id": "global_page_rule_023",
       "enabled": true,
       "description": "架构决策事项填写规范",
-      "template_scope": ["*"],
+      "template_scope": [
+        "*"
+      ],
       "title_match": {
         "mode": "any_contains",
-        "keywords": ["架构决策事项"],
+        "keywords": [
+          "架构决策事项"
+        ],
         "normalize_whitespace": true,
-        "ignore_suffixes": ["（续）", "(续)"]
+        "ignore_suffixes": [
+          "（续）",
+          "(续)"
+        ]
       },
-      "apply_to": ["planning", "body"],
+      "apply_to": [
+        "planning",
+        "body"
+      ],
       "instruction": "如果需求中未涉及突破标准规范、架构原则、外购产品、不符合技术栈要求等情形，正文填写“不涉及”。如果有，说明申请原因、可选决策及优缺点、建议决策及理由、影响分析及应对措施。",
       "example": "不涉及",
       "priority": 70
@@ -359,14 +611,25 @@
       "id": "global_page_rule_024",
       "enabled": true,
       "description": "缺陷修订验证情况说明填写规范",
-      "template_scope": ["*"],
+      "template_scope": [
+        "*"
+      ],
       "title_match": {
         "mode": "any_contains",
-        "keywords": ["缺陷修订", "验证情况说明"],
+        "keywords": [
+          "缺陷修订",
+          "验证情况说明"
+        ],
         "normalize_whitespace": true,
-        "ignore_suffixes": ["（续）", "(续)"]
+        "ignore_suffixes": [
+          "（续）",
+          "(续)"
+        ]
       },
-      "apply_to": ["planning", "body"],
+      "apply_to": [
+        "planning",
+        "body"
+      ],
       "instruction": "仅在需求文本中明确出现“二级评审意见”、“缺陷修订”或“验证情况”时生成。按条目列出：评审意见、缺陷修订情况（对应修改内容及页码）、问题验证人、验证结论。如未涉及，跳过该页。",
       "priority": 70
     },
@@ -374,14 +637,25 @@
       "id": "global_page_rule_025",
       "enabled": true,
       "description": "文件修订历史与附录填写规范",
-      "template_scope": ["*"],
+      "template_scope": [
+        "*"
+      ],
       "title_match": {
         "mode": "any_contains",
-        "keywords": ["文件修订历史", "附录"],
+        "keywords": [
+          "文件修订历史",
+          "附录"
+        ],
         "normalize_whitespace": true,
-        "ignore_suffixes": ["（续）", "(续)"]
+        "ignore_suffixes": [
+          "（续）",
+          "(续)"
+        ]
       },
-      "apply_to": ["planning", "body"],
+      "apply_to": [
+        "planning",
+        "body"
+      ],
       "instruction": "文件修订历史页和附录一般不作为核心生成内容。如果输入材料中提供了版本变更记录，按表格填写版本号、变化状态、简要说明、变更人、变更日期；否则跳过。附录页如没有对应补充材料，跳过。",
       "priority": 70
     },
@@ -389,14 +663,27 @@
       "id": "global_page_rule_026",
       "enabled": true,
       "description": "通用架构图/流程图兜底生成规范",
-      "template_scope": ["*"],
+      "template_scope": [
+        "*"
+      ],
       "title_match": {
         "mode": "any_contains",
-        "keywords": ["架构", "流程", "时序"],
+        "keywords": [
+          "架构",
+          "流程",
+          "时序"
+        ],
         "normalize_whitespace": true,
-        "ignore_suffixes": ["（续）", "(续)"]
+        "ignore_suffixes": [
+          "（续）",
+          "(续)"
+        ]
       },
-      "apply_to": ["planning", "body", "diagram"],
+      "apply_to": [
+        "planning",
+        "body",
+        "diagram"
+      ],
       "instruction": "如果标题含“架构/流程/时序”且未被更具体规则覆盖，按以下原则处理：\n1. 若需求文本中有明确的系统/模块/接口或流程步骤，则生成对应的架构图或流程图；\n2. 图中元素必须使用输入中真实存在的名称，不得编造；\n3. 没有对应依据时删除该页。",
       "priority": 100
     },
@@ -404,14 +691,21 @@
       "id": "global_page_rule_027",
       "enabled": true,
       "description": "通用内容页防编造",
-      "template_scope": ["*"],
+      "template_scope": [
+        "*"
+      ],
       "title_match": {
         "mode": "any_contains",
-        "keywords": [""],
+        "keywords": [
+          ""
+        ],
         "normalize_whitespace": true,
         "ignore_suffixes": []
       },
-      "apply_to": ["planning", "body"],
+      "apply_to": [
+        "planning",
+        "body"
+      ],
       "instruction": "所有内容页必须基于输入材料中的真实内容填写。固定章节标题保持不变，不允许改写。没有对应依据的页面必须删除，并在 skip_reason 中记录删除原因。",
       "priority": 1000
     }

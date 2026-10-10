@@ -22,6 +22,7 @@ from app.core.constants import (
     BODY_TEXT_FONT_NAME,
     BODY_TEXT_FONT_SIZE_PT,
     BODY_TEXT_LINE_SPACING,
+    PAGE_TYPE_COVER,
     TABLE_TEXT_FONT_NAME,
     TABLE_TEXT_FONT_SIZE_PT,
     TABLE_TEXT_LINE_SPACING,
@@ -52,15 +53,16 @@ class PPTBuilder:
         slide_size = (rules.get("template") or {}).get("slide_size") or {}
 
         presentation = Presentation(self.template_path)
-        delete_slide_indices: list[int] = []
         original_slide_count = len(presentation.slides)
 
+        # 反向遍历：拆页插入与即时删除只影响高索引（已处理）slide，
+        # 低索引待处理页的位置保持不变，不存在索引漂移问题。
         for slide_index in reversed(range(original_slide_count)):
             page_no = slide_index + 1
             result = page_results.get(page_no)
             page_rule = page_rule_map.get(page_no)
             if result is None or page_rule is None or not result.should_generate:
-                delete_slide_indices.append(slide_index)
+                self._delete_slide(presentation, slide_index)
                 continue
             expanded_results = self._expand_result_for_overflow(slide_size, page_rule, result)
             slide = presentation.slides[slide_index]
@@ -74,9 +76,6 @@ class PPTBuilder:
             for duplicated_slide, extra_result in zip(duplicated_slides, expanded_results[1:]):
                 self._fill_slide(duplicated_slide, page_rule, extra_result)
 
-        for slide_index in sorted(delete_slide_indices, reverse=True):
-            self._delete_slide(presentation, slide_index)
-
         target = Path(output_path)
         target.parent.mkdir(parents=True, exist_ok=True)
         presentation.save(target)
@@ -88,26 +87,29 @@ class PPTBuilder:
         slide_index: int,
         page_rule: dict,
         result: StructuredPageResult,
+        slide_size: dict | None = None,
     ) -> list[int]:
         """回填单个 slide，返回实际占用的 slide 索引列表（含拆页）。
 
         与 build() 不同，此方法在已打开的 Presentation 上操作，
         不保存文件，不删除跳过的 slide。用于混合导出场景。
+
+        拆页产生的复制 slide 追加到 deck 末尾（不在原位置插入），
+        保证调用方"slide_index == page_no - 1"的遍历映射不被打乱，
+        最终顺序由导出器的重排步骤统一修正。
         """
         if not result.should_generate:
             return []
-        slide_size = {}
-        expanded_results = self._expand_result_for_overflow(slide_size, page_rule, result)
+        expanded_results = self._expand_result_for_overflow(slide_size or {}, page_rule, result)
         slide = presentation.slides[slide_index]
-        insert_after_index = slide_index
         occupied_indices = [slide_index]
+        duplicated_slides: list[Slide] = []
         for _ in expanded_results[1:]:
-            duplicated_slide = self._duplicate_slide_after(presentation, insert_after_index)
-            insert_after_index += 1
-            occupied_indices.append(insert_after_index)
+            duplicated_slide = self._duplicate_slide_to_end(presentation, slide_index)
+            duplicated_slides.append(duplicated_slide)
+            occupied_indices.append(len(presentation.slides) - 1)
         self._fill_slide(slide, page_rule, expanded_results[0])
-        for idx, extra_result in enumerate(expanded_results[1:], start=1):
-            duplicated_slide = presentation.slides[occupied_indices[idx]]
+        for duplicated_slide, extra_result in zip(duplicated_slides, expanded_results[1:]):
             self._fill_slide(duplicated_slide, page_rule, extra_result)
         return occupied_indices
 
@@ -115,15 +117,23 @@ class PPTBuilder:
         rule_element_map = {item["id"]: item for item in page_rule.get("elements", [])}
         result_element_map = {item.id: item for item in result.elements}
         shape_map = {shape.shape_id: shape for shape in slide.shapes}
+        # 封面页所有文本与任意页标题保留模板字体样式（颜色/阴影/字号），
+        # 不走正文固定字体；普通正文继续写死字体，防模板说明文字污染。
+        preserve_page = (
+            result.page_type == PAGE_TYPE_COVER
+            or page_rule.get("page_purpose") == PAGE_TYPE_COVER
+        )
         for element_id, rule in rule_element_map.items():
             shape = shape_map.get(int(rule["shape_id"]))
             result_element = result_element_map.get(element_id)
             if rule["type"] in {"title", "text"}:
                 if shape is not None and hasattr(shape, "text_frame"):
+                    preserve_format = preserve_page or rule["type"] == "title"
                     self._set_text(
                         shape,
                         (result_element.content if result_element is not None else "") or "",
-                        is_body=rule["type"] == "text",
+                        is_body=rule["type"] == "text" and not preserve_format,
+                        preserve_format=preserve_format,
                     )
             elif rule["type"] == "table":
                 if shape is not None and getattr(shape, "has_table", False):
@@ -484,15 +494,25 @@ class PPTBuilder:
             elements=cloned_elements,
         )
 
-    def _duplicate_slide_after(self, presentation: Presentation, slide_index: int) -> Slide:
-        source_slide = presentation.slides[slide_index]
-        duplicated_slide = presentation.slides.add_slide(presentation.slide_layouts[0])
-        for shape in list(duplicated_slide.shapes):
+    def _clone_slide_shapes(self, source_slide: Slide, target_slide: Slide) -> None:
+        for shape in list(target_slide.shapes):
             self._remove_shape(shape)
         for shape in source_slide.shapes:
             cloned_element = deepcopy(shape._element)
             self._detach_placeholder_metadata(cloned_element)
-            duplicated_slide.shapes._spTree.insert_element_before(cloned_element, "p:extLst")
+            target_slide.shapes._spTree.insert_element_before(cloned_element, "p:extLst")
+
+    def _duplicate_slide_to_end(self, presentation: Presentation, slide_index: int) -> Slide:
+        """复制指定 slide 的 shape 并追加到 deck 末尾，不改动原位置的 slide 顺序。"""
+        source_slide = presentation.slides[slide_index]
+        duplicated_slide = presentation.slides.add_slide(presentation.slide_layouts[0])
+        self._clone_slide_shapes(source_slide, duplicated_slide)
+        return duplicated_slide
+
+    def _duplicate_slide_after(self, presentation: Presentation, slide_index: int) -> Slide:
+        source_slide = presentation.slides[slide_index]
+        duplicated_slide = presentation.slides.add_slide(presentation.slide_layouts[0])
+        self._clone_slide_shapes(source_slide, duplicated_slide)
         slide_id_list = presentation.slides._sldIdLst
         new_slide_id = slide_id_list[-1]
         del slide_id_list[-1]
@@ -506,26 +526,55 @@ class PPTBuilder:
                 if parent is not None:
                     parent.remove(node)
 
-    def _set_text(self, shape, content: str, *, is_body: bool = False) -> None:
+    def _set_text(
+        self,
+        shape,
+        content: str,
+        *,
+        is_body: bool = False,
+        preserve_format: bool = False,
+    ) -> None:
         text_frame = shape.text_frame
         paragraph_alignment = None
         font_name = None
         font_size = None
         bold = None
         italic = None
+        saved_ppr = None
+        saved_rpr = None
         if text_frame.paragraphs:
-            paragraph_alignment = text_frame.paragraphs[0].alignment
-            if text_frame.paragraphs[0].runs:
-                font = text_frame.paragraphs[0].runs[0].font
+            first_para = text_frame.paragraphs[0]
+            paragraph_alignment = first_para.alignment
+            ppr = first_para._p.find(qn("a:pPr"))
+            if ppr is not None:
+                saved_ppr = deepcopy(ppr)
+            if first_para.runs:
+                font = first_para.runs[0].font
                 font_name = font.name
                 font_size = font.size
                 bold = font.bold
                 italic = font.italic
+                rpr = first_para.runs[0]._r.find(qn("a:rPr"))
+                if rpr is not None:
+                    saved_rpr = deepcopy(rpr)
         text_frame.clear()
         paragraph = text_frame.paragraphs[0]
         paragraph.text = content
         paragraph.alignment = paragraph_alignment
-        if is_body:
+        if preserve_format:
+            # 封面/标题：还原模板段落级属性与 run 级 rPr（含颜色、阴影、东亚字体、lang）
+            if saved_ppr is not None:
+                existing_ppr = paragraph._p.find(qn("a:pPr"))
+                if existing_ppr is not None:
+                    paragraph._p.remove(existing_ppr)
+                paragraph._p.insert(0, deepcopy(saved_ppr))
+            for run in paragraph.runs:
+                existing_rpr = run._r.find(qn("a:rPr"))
+                if existing_rpr is not None:
+                    run._r.remove(existing_rpr)
+                if saved_rpr is not None:
+                    run._r.insert(0, deepcopy(saved_rpr))
+        elif is_body:
             # 正文不跟随模板提示文字样式：固定字体/字号/行距
             paragraph.line_spacing = BODY_TEXT_LINE_SPACING
             for run in paragraph.runs:
@@ -537,11 +586,13 @@ class PPTBuilder:
                     italic=False,
                 )
         elif paragraph.runs:
-            font = paragraph.runs[0].font
-            font.name = font_name
-            font.size = font_size
-            font.bold = bold
-            font.italic = italic
+            # 兜底：还原捕获的字体属性到所有 run（多行不止第一个）
+            for run in paragraph.runs:
+                font = run.font
+                font.name = font_name
+                font.size = font_size
+                font.bold = bold
+                font.italic = italic
 
     @staticmethod
     def _apply_fixed_run_font(

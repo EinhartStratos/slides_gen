@@ -106,6 +106,8 @@ def build_structured_user_prompt(requirement_text: str, page_rule: dict, page_ge
         "6. 所有元素 id 必须严格复用模板规则里的 id。\n"
         "7. 不需要返回没有生成内容的元素。\n"
         "8. 只输出 JSON。\n"
+        "9. 表格中“类别/类型/实施类型”这类枚举列的取值必须从 table_schema.default_cells 已出现的取值中选择，禁止自拟新值。\n"
+        "10. 表格行数按实际数据条数填，一行一个对象，禁止把多个对象合并为一行。\n"
         f"需求全文：\n{requirement_text}\n\n"
         f"单页模板规则：\n{json.dumps(model_page_rule, ensure_ascii=False, indent=2)}\n\n"
         f"输出 JSON 结构示例：\n{json.dumps(output_schema, ensure_ascii=False, indent=2)}",

@@ -98,6 +98,7 @@ class HybridPptxExporter:
         presentation = Presentation(template_pptx_path)
         original_slide_count = len(presentation.slides)
         page_rule_map = {int(page["page_no"]): page for page in template_rules.get("pages", [])}
+        slide_size = (template_rules.get("template") or {}).get("slide_size") or {}
 
         insert_svg_pages = insert_svg_pages or set()
 
@@ -108,32 +109,31 @@ class HybridPptxExporter:
 
         for slide_index in range(original_slide_count):
             page_no = slide_index + 1
+            result = structured_pages.get(page_no)
+            page_rule = page_rule_map.get(page_no, {})
+
+            # 目录页/尾页为固定页：无论任何情况都原样保留，绝不删除或改写
+            if self._is_pinned_page(page_rule, result):
+                page_to_slide_indices[page_no] = [slide_index]
+                continue
+
             if page_no in skipped_pages:
                 delete_indices.add(slide_index)
                 page_to_slide_indices[page_no] = []
                 continue
 
-            result = structured_pages.get(page_no)
             has_svg = page_no in svg_pages
             insert_svg = page_no in insert_svg_pages
-
-            # 目录页/致谢页：原样保留模板页，不添加或修改任何内容
-            if (
-                result is not None
-                and result.should_generate
-                and result.page_type in TEMPLATE_COPY_PAGE_TYPES
-            ):
-                page_to_slide_indices[page_no] = [slide_index]
-                continue
 
             if result is not None:
                 if not result.should_generate:
                     delete_indices.add(slide_index)
                     page_to_slide_indices[page_no] = []
                     continue
-                page_rule = page_rule_map.get(page_no, {})
                 builder = PPTBuilder(template_pptx_path)
-                occupied = builder.fill_single_slide(presentation, slide_index, page_rule, result)
+                occupied = builder.fill_single_slide(
+                    presentation, slide_index, page_rule, result, slide_size=slide_size,
+                )
                 page_to_slide_indices[page_no] = occupied
 
                 # v4 组装：在已回填的结构化页面上再插入图形
@@ -170,6 +170,18 @@ class HybridPptxExporter:
         output_path.parent.mkdir(parents=True, exist_ok=True)
         presentation.save(output_path)
         return output_path
+
+    @staticmethod
+    def _is_pinned_page(page_rule: dict, result: StructuredPageResult | None) -> bool:
+        """固定页（目录/尾页）判定：命中即原样保留，任何情况不删除。"""
+        purpose = (page_rule or {}).get("page_purpose", "")
+        page_type = getattr(result, "page_type", None)
+        if purpose in TEMPLATE_COPY_PAGE_TYPES or page_type in TEMPLATE_COPY_PAGE_TYPES:
+            return True
+        name = (page_rule or {}).get("page_name") or ""
+        title = ((page_rule or {}).get("title") or {}).get("text") or ""
+        combined = f"{name} {title}"
+        return any(kw in combined for kw in ("目录", "CONTENTS", "感谢", "致谢", "敬请指正"))
 
     def _safe_inject_svg(
         self,

@@ -48,7 +48,11 @@ from app.schemas.structured_generation import StructuredPageResult
 from app.services.svg_validation_service import SvgValidationService
 from app.services.task_service import TaskService
 from app.services.template_service import TemplateService
-from app.services.requirement_preprocessor import RequirementPreprocessor
+from app.services.requirement_preprocessor import (
+    ProcessedRequirement,
+    RequirementPreprocessor,
+    build_scoped_context,
+)
 from app.schemas.structured_generation import StructuredPageResult
 
 
@@ -98,29 +102,31 @@ class OrchestrationService:
         except Exception as exc:
             logger.warning("通知 Generation 聚合状态失败: %s", exc)
 
-    async def _preprocess_requirement(self, api_key: str, raw_text: str) -> str:
+    async def _preprocess_requirement(self, api_key: str, raw_text: str) -> ProcessedRequirement:
         """对 requirement_text 做结构化预处理，失败则返回原文。"""
         try:
             client = getattr(self.slide_service, "generation_client", None)
             if not client or not client.enabled or not api_key:
-                return raw_text
+                return ProcessedRequirement(raw_text=raw_text, formatted_text=raw_text)
             preprocessor = RequirementPreprocessor(
                 llm_client=client,
                 api_key=api_key,
                 max_input_chars=40000,
                 max_concurrency=2,
             )
-            processed = await preprocessor.preprocess(raw_text)
-            return processed.formatted_text
+            return await preprocessor.preprocess(raw_text)
         except Exception as exc:
             logger.warning("requirement 预处理失败，使用原文: %s", exc)
-            return raw_text
+            return ProcessedRequirement(raw_text=raw_text, formatted_text=raw_text)
 
     async def run_task(self, api_key: str, task_id: str) -> None:
         task = self.task_service.get_task(api_key, task_id)
         raw_text = str(task.get("requirement_text") or "")
         if raw_text.strip():
-            task["requirement_text"] = await self._preprocess_requirement(api_key, raw_text)
+            processed = await self._preprocess_requirement(api_key, raw_text)
+            task["requirement_text"] = processed.formatted_text
+            # 分块结果仅保存在内存 task 上（非 DB 列），供分页路由上下文用
+            task["requirement_chunks"] = processed.chunks
         task_type = task.get("task_type") or "legacy"
 
         if task_type == TASK_TYPE_BODY:
@@ -437,6 +443,14 @@ class OrchestrationService:
             return
 
         page_name = source_svg.stem
+
+        # 章节级上下文路由：该页只看它该看的文档块，全局摘要仍作为兜底
+        scoped_requirement_text = requirement_text
+        route_page_name = (page_rule or {}).get("page_name") or page_name
+        scoped = build_scoped_context(task.get("requirement_chunks"), route_page_name)
+        if scoped:
+            scoped_requirement_text = f"{requirement_text}\n\n【本页专属参考资料】\n{scoped}"
+
         template_svg_ftp_path = self.ftp.join(
             str(task["ftp_template_snapshot_dir"]),
             "svg-flat",
@@ -591,10 +605,11 @@ class OrchestrationService:
             self._process_structured_page(
                 api_key=api_key,
                 task_id=task_id,
-                requirement_text=requirement_text,
+                requirement_text=scoped_requirement_text,
                 page_no=page_no,
                 page_name=page_name,
                 page_rule=page_rule,
+                page_type=page_type,
                 llm_model=llm_model,
                 llm_enable_thinking=llm_enable_thinking,
                 task_workspace=task_workspace,
@@ -613,7 +628,7 @@ class OrchestrationService:
 
         try:
             page_result = self.slide_service.generate_page_svg(
-                api_key, requirement_text, page_no, source_svg, page_plan,
+                api_key, scoped_requirement_text, page_no, source_svg, page_plan,
                 model=llm_model, enable_thinking=llm_enable_thinking,
                 check_rules_text=check_rules_text,
                 page_generation_rules_text=body_rules_text,
@@ -844,6 +859,7 @@ class OrchestrationService:
         check_rules_text: str = "",
         page_generation_rules_text: str = "",
         custom_requirements: str = "",
+        page_type: str | None = None,
     ) -> None:
         """结构化填充路径：LLM 输出 JSON → 保存结果 → 记录到 structured_pages。"""
         try:
@@ -859,6 +875,9 @@ class OrchestrationService:
                 page_generation_rules_text=page_generation_rules_text,
                 custom_requirements=custom_requirements,
             )
+            # 透传规划阶段 page_type：封面页据此走"保格式回填"
+            if result.page_type is None and page_type:
+                result.page_type = page_type
 
             if not result.should_generate:
                 with lock:
@@ -1142,6 +1161,13 @@ class OrchestrationService:
         """处理单个图形页：规划 → 生成 SVG → 校验 → 保存。"""
         page_name = source_svg.stem
 
+        # 章节级上下文路由：图形页只看画图要求/流程相关文档块
+        scoped_requirement_text = requirement_text
+        route_page_name = (page_rule or {}).get("page_name") or page_name
+        scoped = build_scoped_context(task.get("requirement_chunks"), route_page_name)
+        if scoped:
+            scoped_requirement_text = f"{requirement_text}\n\n【本页专属参考资料】\n{scoped}"
+
         self.task_service.repository.upsert_page(
             {
                 "task_id": task_id,
@@ -1186,7 +1212,7 @@ class OrchestrationService:
 
         page_plan = self.slide_service.plan_single_page(
             api_key=api_key,
-            requirement_text=requirement_text,
+            requirement_text=scoped_requirement_text,
             page_no=page_no,
             page_name=page_name,
             svg_content=svg_content,
@@ -1254,7 +1280,7 @@ class OrchestrationService:
         try:
             page_result = self.slide_service.generate_diagram_svg(
                 api_key=api_key,
-                requirement_text=requirement_text,
+                requirement_text=scoped_requirement_text,
                 page_no=page_no,
                 page_name=page_name,
                 page_title=page_title,
